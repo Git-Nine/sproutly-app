@@ -19,8 +19,16 @@ export type SupabaseEnv = z.infer<typeof supabaseEnvSchema>
  * if anything is missing or malformed, instead of letting a half-configured
  * client fail mysteriously later.
  */
-export function parseSupabaseEnv(env: NodeJS.ProcessEnv = process.env): SupabaseEnv {
-  const result = supabaseEnvSchema.safeParse(env)
+export function parseSupabaseEnv(env?: Partial<Record<keyof SupabaseEnv, string | undefined>>): SupabaseEnv {
+  // NOTE: Next.js inlines `NEXT_PUBLIC_*` vars into the client bundle only when
+  // they are referenced as explicit static member expressions. Passing the whole
+  // `process.env` object means nothing gets inlined and every var reads as
+  // `undefined` in the browser — so each key MUST be referenced directly here.
+  const source = env ?? {
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  }
+  const result = supabaseEnvSchema.safeParse(source)
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
