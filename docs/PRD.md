@@ -21,7 +21,7 @@ Millions replace gardens with gravel and sealed surfaces believing it is the low
 | Priority | Feature | Status |
 |----------|---------|--------|
 | P0 (MVP) | PROJ-1 Supabase Infrastructure Setup | Approved |
-| P0 (MVP) | PROJ-2 User Authentication & Profile | Architected |
+| P0 (MVP) | PROJ-2 User Authentication & Profile | In Progress |
 | P0 (MVP) | PROJ-3 Photo Upload & Space Scan | Roadmap |
 | P0 (MVP) | PROJ-4 Environmental Data Enrichment | Roadmap |
 | P0 (MVP) | PROJ-5 Plant Database & Admin Interface | Roadmap |

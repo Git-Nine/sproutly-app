@@ -16,7 +16,7 @@
 | ID | Feature | Status | Priority | Depends on | Spec | Created |
 |----|---------|--------|----------|-----------|------|---------|
 | PROJ-1 | Supabase Infrastructure Setup | Approved | P0 | None | [PROJ-1](PROJ-1-supabase-infrastructure-setup.md) | 2026-06-17 |
-| PROJ-2 | User Authentication & Profile | Architected | P0 | PROJ-1 | [PROJ-2](PROJ-2-user-authentication-and-profile.md) | 2026-06-17 |
+| PROJ-2 | User Authentication & Profile | In Progress | P0 | PROJ-1 | [PROJ-2](PROJ-2-user-authentication-and-profile.md) | 2026-06-17 |
 | PROJ-3 | Photo Upload & Space Scan | Roadmap | P0 | PROJ-1, PROJ-2 | — | 2026-06-17 |
 | PROJ-4 | Environmental Data Enrichment | Roadmap | P0 | PROJ-3 | — | 2026-06-17 |
 | PROJ-5 | Plant Database & Admin Interface | Roadmap | P0 | PROJ-1, PROJ-2 | — | 2026-06-17 |

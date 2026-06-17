@@ -1,6 +1,6 @@
 # PROJ-2: User Authentication & Profile
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-06-18
 **Last Updated:** 2026-06-18
 
@@ -168,6 +168,29 @@ See the Technical Decisions table above. Key points: PKCE magic link + 6-digit c
 ### Notes for Implementation
 - This feature needs **both** `/frontend` (login, profile, avatar UI) and `/backend` (callback route, profile update + avatar upload server logic, delete-account route, middleware route-gating).
 - The PROJ-1 carried-forward runtime ACs (AC-3/5/6/7/8) should be exercised by this feature's E2E suite against two real accounts.
+
+## Implementation Notes (Frontend)
+
+**Design-system foundation (applies app-wide):**
+- Retheme to Sproutly palette in `globals.css` (cream canvas, forest-green primary, taupe secondary, sage accent, terracotta destructive) + softer `--radius`; added `.eyebrow` label utility.
+- Fonts wired in `layout.tsx`: **Montserrat** (body), **Fraunces** (serif headings), **IBM Plex Mono** (eyebrow labels) via `next/font`; `fontFamily` mapped in `tailwind.config.ts`.
+- `providers.tsx` forces the light theme (cream) regardless of OS; Sonner `<Toaster>` mounted in layout.
+
+**Screens & components built:**
+- `app/login/page.tsx` (server; redirects authed users away, open-redirect-safe `returnTo`) → `components/auth/login-form.tsx` (client): email → `signInWithOtp` (magic link), then **6-digit code** via `verifyOtp`; resend + "use a different email"; rate-limit (429) messaging.
+- `app/profile/page.tsx` (server; redirects unauthed → `/login?returnTo=/profile`; loads row with `select('*')`, signs avatar URL) → `components/profile/profile-form.tsx` (client) composing `avatar-uploader.tsx` (uploads to PROJ-1 private bucket at fixed path `{user_id}/avatar`, signed-URL preview, replace/remove) and `account-actions.tsx` (logout; delete-account `AlertDialog`).
+- `app/page.tsx` — protected home placeholder (redirects unauthed → `/login`).
+- `components/brand/logo.tsx` — leaf + serif wordmark.
+- Validation/constants in `lib/profile.ts`; reused PROJ-1's `@/lib/supabase/{client,server}`.
+
+**Verification:** `tsc --noEmit` clean · unit tests 4/4 · `next build` succeeds (`/`, `/login`, `/profile` + middleware).
+
+**Pending the PROJ-2 backend step (UI is wired to these contracts):**
+- **`users` migration** adding `display_name` + `avatar_path` — until applied, *saving those two fields* errors (maintenance/experience save fine now). The profile read tolerates their absence via `select('*')`.
+- **`/auth/callback`** route handler (PKCE code exchange) — needed for the *magic-link tap* path; the 6-digit code path already works end-to-end.
+- **`/api/account/delete`** route (service-role) — the delete dialog POSTs here.
+- **Middleware route-gating** — PROJ-1's middleware only refreshes the session; pages currently self-guard via server-side `getUser()`. Also resolve the Next 16 `middleware`→`proxy` rename deprecation.
+- Dashboard: add the 6-digit token to the email template; set Site URL + redirect URLs for `/auth/callback`.
 
 ## QA Test Results
 _To be added by /qa_
