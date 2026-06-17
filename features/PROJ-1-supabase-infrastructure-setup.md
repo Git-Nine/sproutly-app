@@ -1,6 +1,6 @@
 # PROJ-1: Supabase Infrastructure Setup
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-06-17
 **Last Updated:** 2026-06-17
 
@@ -54,9 +54,9 @@
 - Auth session handling wired for both server and client (App Router) plus middleware for protected routes.
 
 ## Open Questions
-- [ ] Magic-link email: stick with Supabase's built-in email service for v1, or configure custom SMTP for deliverability/branding? (Built-in service has rate limits.)
-- [ ] On auth-user deletion, should the `users` row **and** the user's storage files cascade-delete (GDPR right-to-erasure)? Assumed yes — confirm.
-- [ ] Single hosted Supabase project for v1 (no separate staging environment)? Assumed yes.
+- [x] Magic-link email: stick with Supabase's built-in email service for v1, or configure custom SMTP? → **Resolved (/architecture):** built-in service for v1; revisit before scaling (rate limits apply).
+- [x] On auth-user deletion, should the `users` row **and** the user's storage files cascade-delete (GDPR right-to-erasure)? → **Resolved (/architecture):** yes — cascade delete everything.
+- [x] Single hosted Supabase project for v1 (no separate staging environment)? → **Resolved (/architecture):** yes — single EU-region project for v1.
 
 ## Decision Log
 
@@ -72,13 +72,68 @@
 ### Technical Decisions
 | Decision | Rationale | Date |
 |----------|-----------|------|
-| _To be added by /architecture_ | | |
+| `@supabase/ssr` for the connection layer | Official, current way to handle auth sessions across server components, browser, and middleware in Next.js App Router; replaces the deprecated auth-helpers | 2026-06-17 |
+| Single hosted Supabase project, **EU region** | German users + GDPR — keep data in the EU; no separate staging environment for v1 | 2026-06-17 |
+| Magic-link auth with Supabase **built-in email** for v1 | Passwordless, zero email setup; built-in send rate is sufficient for dev/early beta, revisit before scale | 2026-06-17 |
+| Single **private** storage bucket, user-namespaced (`/{user_id}/...`) | Simplest design that fully isolates each user's photos; shared by scan (PROJ-3) and progress (PROJ-9) images | 2026-06-17 |
+| Auto-create `users` profile row on first sign-in (idempotent) | Guarantees the profile always exists for later features; safe against duplicate creation on repeated sign-in | 2026-06-17 |
+| Cascade delete on account removal (profile row + storage files) | Clean GDPR right-to-erasure; nothing orphaned | 2026-06-17 |
+| Validate Supabase env vars at startup (fail fast) | Clear, immediate error if keys are missing/invalid instead of a silent null client failing later | 2026-06-17 |
+| Service-role key kept server-only; only URL + anon key are public | Prevents privilege escalation from the browser; standard Supabase security boundary | 2026-06-17 |
 
 ---
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Building Blocks
+PROJ-1 has **no user-facing screens** (login UI is PROJ-2). It is the foundation everything else stands on:
+
+```
+Supabase Project (single, EU region)
+├── Environment Config
+│   ├── Public keys (URL + anon key) — safe in the browser
+│   └── Service-role key — server-only, never shipped to the browser
+├── Connection Layer (how the app talks to Supabase)
+│   ├── Browser client   → for components running in the user's browser
+│   ├── Server client    → for server-rendered pages & server actions
+│   └── Middleware       → keeps the login session fresh, guards protected routes
+├── Authentication
+│   └── Magic-link (passwordless email) — built-in email service for v1
+├── Database
+│   └── users (profile) table  ← the only table PROJ-1 creates
+│       └── RLS convention      ← the security pattern every later feature copies
+├── Auto-provisioning
+│   └── On first sign-in → a profile row is created automatically (safely, no duplicates)
+├── Storage
+│   └── One private bucket, each user locked to their own /{user_id}/ folder
+└── Account Deletion
+    └── Deleting a user removes their profile row AND all their photos (GDPR erasure)
+```
+
+### Data Model (plain language)
+**`users` (profile)** — one row per account:
+- **ID** — matches the Supabase auth user (links login to profile)
+- **Email**
+- **Role** — `user` or `admin`, defaults to `user` (admin set manually via the dashboard)
+- **Maintenance preference** & **Experience level** — columns exist now, populated later by PROJ-2's profile UI
+- **Created timestamp**
+
+Access rule (RLS): a logged-in person can only see and edit **their own** profile row. The `role` value is what later admin features (PROJ-5) check.
+
+**Storage** — one **private** bucket. Every file lives under a folder named after the owner's user ID; the access policy only ever lets a person touch files inside their own folder. Scan photos (PROJ-3) and progress photos (PROJ-9) both live here.
+
+### Tech Decisions (summary)
+See the Technical Decisions table above for the full list with rationale. Key points: `@supabase/ssr` for session handling, EU-region single project, magic-link + built-in email, single private user-namespaced bucket, idempotent profile auto-provisioning, cascade delete on account removal, fail-fast env validation, service-role key server-only.
+
+### Dependencies to Install
+- **`@supabase/ssr`** — session handling for the App Router (the one genuinely new package)
+- **`supabase` CLI** (dev only) — to manage the database migration locally
+- _(`@supabase/supabase-js` and `zod` are already installed.)_
+
+### Notes for Implementation (/backend)
+- This feature is **backend-only** — run `/backend` next, not `/frontend` (no UI to build in PROJ-1).
+- The RLS pattern established here (`user_id = auth.uid()`, policies for SELECT/INSERT/UPDATE/DELETE) is the template every subsequent feature's tables must follow.
 
 ## QA Test Results
 _To be added by /qa_
