@@ -141,6 +141,7 @@ See the Technical Decisions table above for the full list with rationale. Key po
 - **Migrations** (`supabase/migrations/`):
   - `…_proj1_users_profile_and_auth.sql` — `public.users` profile table (FK to `auth.users` with `ON DELETE CASCADE`), RLS owner-only policies (SELECT/INSERT/UPDATE; no DELETE), `prevent_role_self_escalation` trigger, and idempotent `handle_new_user` auto-provisioning trigger.
   - `…_proj1_storage_photos_bucket.sql` — private `photos` bucket, user-namespaced storage policies (`/{user_id}/...`), and `handle_user_deletion` trigger that removes a user's files on account deletion (GDPR erasure).
+  - `…_proj1_revoke_trigger_fn_execute.sql` — revokes `EXECUTE` on the three trigger functions from `public`/`anon`/`authenticated` so they can't be called directly via the REST API (triggers still fire as the owner). Added in response to security-advisor lints 0028/0029.
 - **Connection layer** (`src/lib/supabase/`): `env.ts` (Zod validation, fail-fast, memoized), `client.ts` (browser), `server.ts` (server, cookie-based), `middleware.ts` (`updateSession` session refresher).
 - **Root middleware** (`src/middleware.ts`) refreshes the auth session on every request.
 - Removed the obsolete `src/lib/supabase.ts` placeholder (nothing imported it).
@@ -151,7 +152,7 @@ See the Technical Decisions table above for the full list with rationale. Key po
 - Added a `prevent_role_self_escalation` trigger (not in the original spec) — the plain UPDATE policy would otherwise let a user set their own `role = 'admin'`. Role changes are allowed only from a privileged context (dashboard/service role) or by an existing admin.
 - Env validation is **lazy + memoized** (`getSupabaseEnv`) rather than evaluated at import — so it fails fast on first use (e.g. middleware on the first request) while remaining unit-testable. The pure `parseSupabaseEnv` function is covered by tests.
 
-**Not applied to the live project:** the connected Supabase MCP is **read-only**, so migrations are committed as repo files for the operator to apply via `supabase db push` or the SQL Editor (see `docs/supabase-setup.md`). RLS/storage-policy behaviour should be verified in `/qa` against the applied database.
+**Applied & verified (2026-06-17):** all three migrations were applied to the live project via the SQL Editor (MCP is read-only). Verified through MCP: `public.users` table present with RLS enabled, correct columns/checks, PK and FK to `auth.users`; `photos` bucket + policies present. **Security advisor: 0 warnings** after the trigger-function EXECUTE revoke. RLS/storage runtime behaviour (cross-user denial, etc.) still to be exercised in `/qa`.
 
 **Tests:** `src/lib/supabase/env.test.ts` — 4 passing (valid env; missing URL; invalid URL; missing anon key). No API routes in this feature, so no route tests. Typecheck (`tsc --noEmit`) passes. (Project-wide `npm run lint` is broken: Next 16 removed `next lint` while the repo still uses `.eslintrc` — pre-existing, unrelated to this feature.)
 
