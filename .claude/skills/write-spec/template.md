@@ -17,10 +17,10 @@
 
 ## Acceptance Criteria
 
-**Format:** Angenommen [Vorbedingung] / Wenn [Aktion] / Dann [Ergebnis]
+**Format:** Given [precondition] / When [action] / Then [result]
 
-- [ ] Angenommen [Vorbedingung], wenn [Aktion], dann [Ergebnis]
-- [ ] Angenommen [Vorbedingung], wenn [Aktion], dann [Ergebnis]
+- [ ] Given [precondition], when [action], then [result]
+- [ ] Given [precondition], when [action], then [result]
 
 ## Edge Cases
 - What happens when...?
