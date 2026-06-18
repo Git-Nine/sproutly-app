@@ -1,8 +1,8 @@
 # PROJ-2: User Authentication & Profile
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (backend implemented)
+**Last Updated:** 2026-06-18 (QA — NOT production-ready: 1 High security bug)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — magic-link auth provider, `users` profile table, RLS, private `photos` bucket, and session-refresh middleware.
@@ -217,7 +217,91 @@ See the Technical Decisions table above. Key points: PKCE magic link + 6-digit c
 **Verification:** `tsc --noEmit` clean · `next build` succeeds (all routes + Proxy) · tests **13/13** (env 4, delete route 4, callback route 5). Route tests cover happy path, 401 unauth, session-id-only authorization, 500 failure, valid/invalid/missing code, and the open-redirect guard.
 
 ## QA Test Results
-_To be added by /qa_
+
+**QA date:** 2026-06-18 · **Tester:** QA Engineer (`/qa`) · **Build:** `next build` ✓ (9 routes + Proxy) · **Verdict:** ⛔ **NOT production-ready** — one High security finding (open redirect in the auth flow). No Critical bugs.
+
+### Environment / setup verification
+- ✅ PROJ-2 migration **is applied** to the remote DB — `public.users` has `display_name` (with the `char_length <= 50` CHECK) and `avatar_path`. (The spec's "migration not yet applied" warning is now resolved.)
+- ✅ `SUPABASE_SERVICE_ROLE_KEY` present in `.env.local` (server-only, no `NEXT_PUBLIC_`).
+- ✅ Supabase security advisor: only `auth_leaked_password_protection` (WARN) — **N/A** to PROJ-2 (magic-link only, no passwords).
+- ⚠️ Email-template 6-digit token + Site/redirect URLs are a dashboard setting QA can't introspect; the OTP path is wired correctly in code.
+
+### Test coverage
+- **Unit/integration (Vitest): 49/49 pass.** New: `src/lib/profile.test.ts` (24 cases — `initialsFor`, `validateAvatarFile`, `profileSchema`, email/OTP schemas, incl. boundary + emoji/unicode-adjacent cases). Existing route/env tests (delete route, callback route, env) all pass.
+- **E2E (Playwright): 12/12 pass** on **Chromium (desktop)** and **Mobile Safari (iPhone 13, 390px)** — `tests/PROJ-2-auth-profile.spec.ts`. Covers the acceptance criteria reachable without a live authenticated session.
+- Vitest config scoped to `src/**` so it no longer tries to run Playwright specs in `tests/`.
+
+### Acceptance criteria
+Legend: ✅ verified (automated) · 🟡 verified by code/migration + unit/route tests, **runtime not exercised** (needs real magic-link/OTP sign-in) · ⚠️ caveat.
+
+**Authentication**
+- ✅ Empty / malformed email → validation error, no link sent. *(E2E, both browsers)*
+- ✅ Unauthenticated → protected route → redirect to `/login?returnTo=…`. *(E2E)* — the "returned to that route after sign-in" half is 🟡 (returnTo plumbing verified in code).
+- ✅ Expired/used link → error shown with option to request a new one. *(callback route test + E2E `?error=link_invalid` message)*
+- 🟡 Valid email → magic link sent + "check your email" confirmation. *(Confirmation UI + `signInWithOtp` wiring verified; the actual send is not auto-tested — it mutates state / sends real email / hits rate limits.)*
+- 🟡 Click magic link → authenticated + redirected. *(`/auth/callback` PKCE exchange covered by route tests; needs a real link at runtime.)*
+- 🟡 Authenticated visits `/login` → redirected home. *(middleware + page guard verified.)*
+- 🟡 Rate limit hit → "please wait" message. *(429 handling present in `login-form.tsx`.)*
+
+**Session**
+- 🟡 Session persists within validity. *(Supabase defaults + proxy refresh.)*
+- 🟡 Log out → session ends → `/login`. *(verified in code; see BUG-5 re: error path.)*
+
+**Profile**
+- ✅ Disallowed type / >5 MB → error, no upload. *(unit: `validateAvatarFile`)*
+- ✅ No display name → initials / email-prefix fallback. *(unit: `initialsFor`)*
+- 🟡 Profile loads: email read-only, fields show values/placeholders. *(server load + form verified.)*
+- 🟡 Edit + save → persists + success toast. *(client update under owner-only RLS verified.)*
+- 🟡 Upload allowed image <5 MB → stored privately + shown as avatar. *(upload + signed-URL preview verified.)*
+- 🟡 Remove picture → reverts to initials. *(verified; see BUG-2 consistency caveat.)*
+- ⚠️ Display name > 50 chars → validation error: the input's `maxLength={50}` makes the over-limit **error state unreachable via the UI**. The "nothing is saved" outcome holds (prevention + zod `.max(50)` + DB CHECK), but the AC's "a validation error is shown" can't be demonstrated through the form. See BUG-6 (observation).
+
+**Account Deletion**
+- 🟡 Delete → confirm dialog appears; Cancel → nothing deleted; Confirm → account/profile/files deleted + logout → `/login`. *(AlertDialog + delete route logic covered by route tests — happy path, 401 unauth, session-id-only authorization, 500 failure; the destructive cascade against a real account is not exercised.)*
+
+**Security (carried-forward PROJ-1 runtime ACs)** — all 🟡 **structurally verified, runtime NOT exercised against two real accounts** (see Residual risk):
+- 🟡 A reads/edits only A's own profile, never B's. *(owner-only RLS policies present.)*
+- 🟡 Avatar lives under the user's own namespace, not accessible to others. *(fixed `{user_id}/avatar` path + storage RLS.)*
+- 🟡 First sign-in → profile row with `role = 'user'`. *(`handle_new_user` trigger.)*
+- 🟡 Regular user can't set own `role` to admin. *(`prevent_role_self_escalation` trigger restores old role; the profile form never sends `role`.)*
+
+### Bugs found
+
+| ID | Severity | Title |
+|----|----------|-------|
+| BUG-1 | **High** (security) | Open redirect in auth `returnTo` via backslash bypass |
+| BUG-2 | Low | Avatar storage/DB inconsistency when removing/uploading without saving |
+| BUG-3 | Low | `SUPABASE_SERVICE_ROLE_KEY` not documented in `.env.local.example` |
+| BUG-4 | Low | No working lint (`next lint` removed in Next 16; no `eslint.config.js`) |
+| BUG-5 | Low | `handleLogout` doesn't reset loading state / handle a failed `signOut` |
+| BUG-6 | Low (observation) | Display-name >50 validation error unreachable via UI (`maxLength`) |
+
+**BUG-1 — Open redirect in auth `returnTo` (High, security).**
+`safeReturnTo` guards with `value.startsWith('/') && !value.startsWith('//')`. A value of `/\evil.com` (slash + backslash) passes the guard, and browsers normalize the backslash to `/`, resolving it to `http://evil.com/` (verified empirically).
+- **Exploitable in:** `src/app/login/page.tsx` (`redirect(safeReturnTo(returnTo))`) and `src/components/auth/login-form.tsx` (`window.location.href = returnTo` after OTP sign-in).
+- **Not exploitable in:** `src/app/auth/callback/route.ts` and `src/lib/supabase/middleware.ts` — both build an absolute URL on a hardcoded origin, so `/\evil.com` collapses to a same-origin `//evil.com` path.
+- **Repro:** open `/login?returnTo=/%5Cevil.com`, sign in with the 6-digit code → browser lands on `evil.com`. Phishing / credential-harvest vector.
+- **Steps for the fix (frontend/backend skill):** in the shared `safeReturnTo` helper, also reject values containing a backslash (and ideally any control chars) — e.g. return `'/'` unless `/^\/(?!\/)[^\\]*$/` matches. The helper is **duplicated in 4 files**; consider centralizing it in `lib/` so the fix lands once. Auth-flow change → per the project's security rules, get explicit approval.
+
+**BUG-2 — Avatar remove/upload not atomic with Save (Low).** `avatar-uploader.tsx` deletes/overwrites the Storage object immediately, but `users.avatar_path` is only persisted on "Save changes". Abandoning after Remove leaves the DB pointing at a deleted object (next load 404s the signed URL → falls back to initials, so it degrades gracefully but the row is stale). Abandoning after a first upload leaves a stored object with `avatar_path` still null. Low impact (fixed path → no orphan pile-up). Consider persisting the path change in the same action as the storage mutation.
+
+**BUG-3 — Undocumented env var (Low).** `.env.local.example` lists only the two `NEXT_PUBLIC_` vars; `SUPABASE_SERVICE_ROLE_KEY` (required by the delete route) is missing. Security rules require documenting new env vars. (Env files were permission-blocked for the implementer — needs a manual one-line add with a dummy value.)
+
+**BUG-4 — No working lint (Low, project-wide).** `npm run lint` runs `next lint`, removed in Next 16, and there's no `eslint.config.js`, so linting errors out entirely. Not a PROJ-2 functional defect but a CI/quality gap surfaced here. Migrate to flat-config ESLint (`eslint.config.mjs`) and update the script.
+
+**BUG-5 — Logout loading state (Low).** `account-actions.tsx#handleLogout` sets `loggingOut = true` then calls `signOut()` + redirect with no try/catch; if `signOut()` rejects, the button spins indefinitely and no redirect occurs. Wrap in try/finally and reset state on error (matches the project's "reset loading in all code paths" rule, which `handleDelete` already follows).
+
+**BUG-6 — Display-name >50 error unreachable (Low / observation).** See the AC note above. Defense is adequate (prevention + zod + DB CHECK); flagged only for AC traceability.
+
+### Informational (not bugs)
+- **CSRF on `/api/account/delete`:** no CSRF token, but Supabase SSR auth cookies are `SameSite=Lax`, so a cross-site POST won't carry them. Acceptable for v1.
+- **Client-only avatar validation:** `validateAvatarFile` runs client-side and is bypassable via a direct Storage call, but uploads are confined to the user's private namespace by Storage RLS, served only to the owner via signed URL, and SVG is excluded — low residual risk. For defense-in-depth, consider per-bucket allowed-MIME/size limits in the PROJ-1 Storage config.
+
+### Residual risk (must close before deploy)
+The four carried-forward security ACs (own-row RLS read/edit + cross-user denial, avatar storage isolation, auto-provisioned `role='user'`, role-escalation rejection) and the authenticated happy-paths are verified by **code/migration review + unit/route tests only** — they were **not exercised against two real authenticated accounts**, because magic-link/OTP sign-in requires real email access this QA pass didn't have. This is the same gap PROJ-1 carried forward. **Recommended:** add a seeded-auth E2E harness using the admin API (`auth.admin.generateLink` to obtain a token, then `verifyOtp`) to mint two real sessions and assert cross-user RLS/storage denial end-to-end, or do a documented manual two-account pass.
+
+### Production-ready decision
+⛔ **NOT READY.** BUG-1 is a confirmed, exploitable open redirect in the authentication flow — small fix, but it should not ship. Fix BUG-1 (and ideally BUG-3/BUG-5), then re-run `/qa`. The Low items and the runtime-AC gap are non-blocking individually but the two-account runtime verification should be closed before `/deploy`.
 
 ## Deployment
 _To be added by /deploy_
