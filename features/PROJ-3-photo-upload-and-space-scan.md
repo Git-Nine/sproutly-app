@@ -1,8 +1,8 @@
 # PROJ-3: Photo Upload & Space Scan
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (backend implemented)
+**Last Updated:** 2026-06-18 (QA — READY: scans isolation proven against two accounts)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — the private, user-namespaced `photos` bucket and the RLS ownership pattern (`user_id = auth.uid()`) this feature's new `scans` table must follow.
@@ -258,7 +258,56 @@ Scan create / read / update / delete run **client-side through Supabase**, exact
 **Verification:** `tsc --noEmit` clean · `next build` succeeds (`/api/geocode` + all scan routes + Proxy) · tests **49/49** (7 new in `geocode/route.test.ts`: 401 unauth, 400 invalid/non-JSON body, DE happy path, non-DE discard, no-PLZ null, upstream-failure fallback). Live-DB RLS/storage behaviour to be exercised in `/qa`.
 
 ## QA Test Results
-_To be added by /qa_
+
+**QA date:** 2026-06-18 · **Tester:** QA Engineer (`/qa`) · **Branch:** `proj-3-spec` (rebased on PROJ-2-complete `main`) · **Verdict:** ✅ **PRODUCTION-READY** — no Critical/High bugs.
+
+### Environment / setup
+- ✅ `public.scans` live with RLS + the 4 owner-only policies; **table-level GRANTs applied & verified** (`has_table_privilege`: authenticated SELECT/INSERT/UPDATE/DELETE true, `anon` false). This was the BUG-7-class gap, fixed before QA.
+- ✅ Reuses PROJ-1's private `photos` bucket (per-user folder policy covers `{user_id}/scans/...`). Supabase security advisor: no new warnings.
+
+### Test coverage
+- **Unit/integration (Vitest): 54/54** — incl. `scans.test.ts` (13: schema validation, photo validation incl. HEIC-by-extension + 10 MB cap, display/path helpers) and `geocode/route.test.ts` (7: 401 unauth, 400 invalid/non-JSON body, DE happy path, non-DE discard, no-PLZ null, upstream-failure fallback).
+- **E2E (Playwright): 13** PROJ-3 tests (31 suite-wide, all green) — route protection on **Chromium + Mobile Safari (390px)** (`PROJ-3-scan-routes.spec.ts`, 3×2) + the **two-account scans isolation harness** (`PROJ-3-scans-rls-isolation.spec.ts`, 7, browser-less `rls` project).
+- `tsc` clean · `npm run lint` clean · `next build` green (11 routes + Proxy).
+
+### Acceptance criteria
+Legend: ✅ verified (automated) · 🟡 code/data-layer verified, **full UI not browser-exercised** (authenticated scan UI needs a real session) · ⚠️ caveat.
+
+**Security (carries PROJ-1 RLS/storage) — ✅ proven against two real accounts (harness):**
+- ✅ A can list/view/edit/delete only A's own scans, never B's *(cross-user read/update/delete all denied; A cannot insert a row owned by B — RLS `with_check`)*.
+- ✅ Scan photo lives under `{user_id}/scans/...` and is not accessible to others *(cross-namespace upload + download denied)*.
+- ✅ Unauthenticated visit to `/scans`, `/scans/new`, `/scans/{id}` → redirect to `/login?returnTo=…` *(E2E, both browsers)*.
+
+**Validation — ✅ unit-tested + DB CHECK defense-in-depth:**
+- ✅ Disallowed type / >10 MB rejected; HEIC accepted (incl. empty-type-by-extension). ✅ Missing photo blocks save (form logic).
+- ✅ Non-5-digit postcode, unselected sun/surface/space-type, out-of-range/non-integer area, over-long name → validation error, nothing saved. Mirrored by table CHECKs (`postcode ~ '^\d{5}$'`, enums, `area_sqm` 1–5000, `name` ≤60).
+
+**Creating / geocode / listing / editing / deleting — 🟡 code + data-layer verified, full UI flow not browser-exercised:**
+- 🟡 Save → scan stored → detail view with "Space saved" + disabled "Generate plan" seam *(data-layer insert/read proven by harness; form orchestration — downscale→upload→insert→redirect — is code-reviewed + its pieces unit-tested)*.
+- 🟡 Camera / library / drag-drop; preview + retake/replace *(component code-verified; not driven in a browser)*.
+- 🟡 EXIF GPS → reverse-geocode prefill (editable); no-GPS/failed-lookup → manual, no block *(geocode route fully unit-tested incl. DE/non-DE/failure; client wiring code-verified)*.
+- 🟡 My Spaces list (thumbnail + summary) / detail / edit (incl. replace photo) / empty state *(server components + signed URLs code-verified; own-row update + delete + photo removal proven at data layer by harness)*.
+- 🟡 Delete confirm dialog → removes row + photo; cancel → nothing *(AlertDialog code-verified; the row+storage delete proven by harness)*.
+
+### Security audit (red team)
+- ✅ **Authorization:** scans owner-only RLS + storage folder policy — cross-user denial proven against two accounts; `with_check` blocks creating rows owned by another user.
+- ✅ **Geocode SSRF:** the Nominatim URL is fixed-host with `lat`/`lng` interpolated; both are Zod-validated numbers with range bounds (NaN/Infinity fail `min`/`max`), so no path/host injection. Auth-gated (401 without session).
+- ✅ **Injection/XSS:** Supabase parameterizes queries; scan fields render as escaped React text; no SVG in accepted photo types. DB CHECKs constrain even a crafted direct PostgREST write.
+- ✅ **Storage path manipulation:** upload path's first segment must equal `auth.uid()` (policy) — proven denied for a cross-user path.
+- ✅ **Secrets:** geocode uses no secret (Nominatim is keyless); service-role key not referenced in PROJ-3 client/route code.
+- No Critical/High/Medium findings.
+
+### Bugs found
+None blocking. Informational / Low (carried or by-design, non-blocking):
+- **INFO-1 (Low):** `POST /api/geocode` has no rate limiting — an authenticated user could spam it and get the app's IP throttled by Nominatim's public instance. Mitigated by auth-gating; tracked in Open Questions ("Nominatim at scale"). Add a per-user throttle (or self-host) before scale.
+- **INFO-2 (Low):** photo type/size validation is client-side only (bypassable via a direct Storage call); mitigated by the private, per-user-namespaced bucket, owner-only signed URLs, and SVG exclusion. Same posture as PROJ-2's avatar; consider per-bucket MIME/size limits in PROJ-1 Storage config for defense-in-depth.
+- **INFO-3 (by-design):** photo uploaded but DB insert fails → one orphaned object at the fixed `{user_id}/scans/{scan_id}/photo` path (overwritten on retry; bounded — no pile-up). Documented edge case.
+
+### Residual risk (close before / at `/deploy`)
+The **authenticated scan UI happy-path is not exercised by an automated browser test** (create/edit/delete via the form, camera/library capture, EXIF→geocode prefill) — it needs a real signed-in session. The security-critical paths and all validation are proven (two-account harness + unit tests); the data layer is confirmed reachable. **Recommended:** a manual two-account browser smoke (now possible with SMTP) — sign in, create a scan from a phone photo (verify EXIF postcode prefill), edit, delete; optionally a future seeded-session browser test to automate it.
+
+### Production-ready decision
+✅ **READY.** No Critical/High bugs. Scan data-layer security (owner-only RLS, storage isolation, grant) is proven end-to-end against two real accounts; validation is unit-tested with DB-level defense; route protection is browser-verified. The Low/INFO items are non-blocking; the manual UI smoke is the recommended pre-deploy step. **Status → Approved.**
 
 ## Deployment
 _To be added by /deploy_
