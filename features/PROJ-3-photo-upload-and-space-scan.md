@@ -2,7 +2,7 @@
 
 ## Status: In Progress
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (frontend implemented)
+**Last Updated:** 2026-06-18 (backend implemented)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — the private, user-namespaced `photos` bucket and the RLS ownership pattern (`user_id = auth.uid()`) this feature's new `scans` table must follow.
@@ -235,6 +235,26 @@ Scan create / read / update / delete run **client-side through Supabase**, exact
 - Storage needs **no change** — photos use the existing private `photos` bucket; PROJ-1's per-user folder policy already covers the `{user_id}/scans/{scan_id}/photo` path.
 
 **Verification:** `tsc --noEmit` clean · `next build` succeeds (`/scans`, `/scans/new`, `/scans/[id]`, `/scans/[id]/edit` + Proxy) · unit tests **26/26** (13 new in `scans.test.ts`: schema validation, photo validation incl. HEIC-by-extension + 10 MB cap, and display/path helpers).
+
+## Implementation Notes (Backend)
+
+**Database (`supabase/migrations/20260618130000_proj3_scans.sql`):**
+- Creates `public.scans` (one row per scanned space) following PROJ-1's RLS convention exactly: RLS enabled; owner-only SELECT/INSERT/UPDATE/DELETE policies scoped `to authenticated` via `(select auth.uid()) = user_id`; FK to `auth.users` with `on delete cascade` (GDPR erasure inherits PROJ-1's storage-cleanup trigger for the photo files).
+- Columns: `id` (uuid, client-supplied or `gen_random_uuid()`), `user_id`, `name` (≤60 check), `photo_path` (not null — enforces "photo required" at the DB), `postcode` (not null, `~ '^\d{5}$'`), `lat`/`lng` (nullable, for PROJ-4), `sun_exposure`/`surface`/`space_type` (enum checks matching the client option sets), `area_sqm` (int, 1–5000 check), `taken_at`, `created_at`, `updated_at`.
+- Composite index `idx_scans_user_created (user_id, created_at desc)` serves the list query (own scans, newest first) and FK/cascade lookups.
+- `set_updated_at` BEFORE UPDATE trigger keeps `updated_at` fresh. Plain (not SECURITY DEFINER) with `search_path = ''` pinned to stay advisor-clean.
+- ⚠️ **Apply step (operator):** run this migration in the Supabase SQL editor (same as PROJ-1/PROJ-2 — MCP was read-only). Until applied, the scans list shows the empty state and saving errors.
+
+**Route built — `POST /api/geocode` (`route.ts`):**
+- Auth-gated (401 if no session). Zod-validates `{ lat, lng }` (400 on bad/non-JSON body). Reverse-geocodes via **Nominatim (OSM)** server-side with an identifying `User-Agent`, `Accept-Language: de`, and a 4s abort timeout.
+- **Germany guard:** non-DE results (or no valid 5-digit PLZ) return `{ postcode: null }`. Upstream failure/timeout returns `{ postcode: null }` (502) so the client always falls back to manual entry — never blocks the scan.
+- No new env var or secret (Nominatim is keyless).
+
+**Scan CRUD stays client-side** (per the architecture decision): the frontend reads/writes `public.scans` and the `photos` bucket directly through the browser client, with owner-only RLS + the per-user storage policy enforcing security. The geocoder is the only server route this feature needs — no `/api/scans` CRUD routes.
+
+**Storage:** unchanged — scan photos reuse PROJ-1's private `photos` bucket; its `(storage.foldername(name))[1] = auth.uid()` policy already covers `{user_id}/scans/{scan_id}/photo`.
+
+**Verification:** `tsc --noEmit` clean · `next build` succeeds (`/api/geocode` + all scan routes + Proxy) · tests **49/49** (7 new in `geocode/route.test.ts`: 401 unauth, 400 invalid/non-JSON body, DE happy path, non-DE discard, no-PLZ null, upstream-failure fallback). Live-DB RLS/storage behaviour to be exercised in `/qa`.
 
 ## QA Test Results
 _To be added by /qa_
