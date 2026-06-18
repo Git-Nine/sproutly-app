@@ -4,16 +4,29 @@ How to get the backend foundation running locally and apply the PROJ-1 migration
 
 ## 1. Environment variables
 
+> **This section is the canonical list of every environment variable the app needs** — for local `.env.local` **and** for the hosting provider (Vercel) dashboard. (`.env.local.example` is the usual quick-copy template, but env files are permission-locked in the AI tooling here, so this doc is the authoritative reference. Mirror these keys into `.env.local.example` if/when you edit it directly.)
+
 Create `.env.local` in the project root with:
 
 ```bash
+# Public — safe to expose in the browser; inlined at build time (NEXT_PUBLIC_*).
 NEXT_PUBLIC_SUPABASE_URL=https://kkdcehmubkhzxhrefzwp.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_Q_MFUU880aIRz55MjkW6CA_qsbqKC3T
+
+# Secret — SERVER-ONLY. Never prefix with NEXT_PUBLIC_, never commit a real value.
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 ```
 
-- These are **public** client keys (safe to expose to the browser); RLS enforces access.
-- The **service-role** key is NOT used by the app and must never be committed or referenced from client-reachable code.
-- If a variable is missing or malformed, the app fails fast at startup with a clear error (see `src/lib/supabase/env.ts`).
+| Variable | Scope | Required | Used by |
+|----------|-------|----------|---------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Public (browser) | ✅ | All Supabase clients |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public (browser) | ✅ | Browser/server clients (RLS enforces access) |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Secret (server-only)** | ✅ | `POST /api/account/delete` (admin client, `src/lib/supabase/admin.ts`) — deletes the auth user, triggering the PROJ-1 cascade |
+
+- The two `NEXT_PUBLIC_*` keys are **public** (safe in the browser); RLS enforces per-user access.
+- `SUPABASE_SERVICE_ROLE_KEY` **bypasses RLS** — it must stay server-side only. It is read solely by `src/lib/supabase/admin.ts` (the account-delete route). A browser import throws because the non-public var is `undefined` there.
+- On **Vercel**: set all three under Project → Settings → Environment Variables. The `NEXT_PUBLIC_*` pair is inlined at build, so set them **before** the first build / redeploy after changing them.
+- If a public variable is missing or malformed, the app fails fast at startup with a clear error (see `src/lib/supabase/env.ts`).
 
 ## 2. Apply the database migrations
 

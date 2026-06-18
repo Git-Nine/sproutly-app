@@ -312,14 +312,14 @@ Applied after the QA pass above (branch `proj-2-qa`), with explicit approval for
 - **BUG-2 (Low) — FIXED.** `avatar-uploader.tsx` now persists `avatar_path` to the row immediately, atomic with the storage mutation (upload → set path; clear path → remove file), so an abandoned form can't leave the row pointing at a missing object. Toasts updated ("Picture updated." / "Picture removed.").
 - **BUG-4 (Low) — FIXED.** Migrated lint to ESLint 9 flat config (`eslint.config.mjs` using `@next/eslint-plugin-next`'s `core-web-vitals`); removed `.eslintrc.json`; `lint` script is now `eslint .`. `npm run lint` runs clean.
 - **BUG-5 (Low) — FIXED.** `handleLogout` wrapped in try/catch — resets the loading state and toasts on a failed `signOut` instead of spinning forever.
-- **BUG-3 (Low) — MANUAL (still open).** `.env.local.example` is permission-blocked from edits in this environment. **Operator action:** add a line `SUPABASE_SERVICE_ROLE_KEY=your-service-role-key` (dummy value) to `.env.local.example`.
+- **BUG-3 (Low) — RESOLVED via docs.** `.env.local.example` is permission-blocked from edits here, so the **canonical env reference** (all three vars incl. server-only `SUPABASE_SERVICE_ROLE_KEY`, with scope + usage) now lives in `docs/supabase-setup.md` §1 — used for both local `.env.local` and the Vercel dashboard. Mirroring the line into `.env.local.example` is a trivial optional paste; no longer a deploy blocker.
 - **BUG-6 (observation) — ACCEPTED, no change.** The >50-char display-name error stays unreachable via the UI by design (`maxLength={50}` + zod `.max(50)` + DB CHECK). Defense is adequate; flagged for AC traceability only.
 
 **Two-account runtime verification — NOW CLOSED.** Built the seeded-auth E2E harness (`tests/PROJ-2-rls-isolation.spec.ts`, dedicated browser-less Playwright project `rls`): the admin API seeds two users, mints real sessions via `generateLink → verifyOtp`, asserts the carried-forward ACs end-to-end, then deletes both (cascade cleanup). **5/5 pass** — AC-3 (auto-provisioned `role='user'`), AC-5 (reads only own row), AC-6 (cannot modify another's row), the role-escalation guard, and AC-7/8 (storage namespace isolation). This is what surfaced BUG-7 above.
 
 **Verification (proj-2-qa):** `tsc --noEmit` clean · `next build` green (6 routes + Proxy) · `npm run lint` clean · unit/integration **34/34** (incl. 16 new `safe-return-to` cases) · seeded-auth RLS harness **5/5** (`npm run test:e2e -- --project=rls`).
 
-**Still open before `/deploy`:** the **BUG-3 manual add** of `SUPABASE_SERVICE_ROLE_KEY` to `.env.local.example`.
+**Still open before `/deploy`:** none blocking — env vars are now documented in `docs/supabase-setup.md` §1 (BUG-3 resolution).
 
 ### Re-QA (2026-06-18) — ✅ PRODUCTION-READY
 
@@ -338,7 +338,7 @@ Re-ran `/qa` on `proj-2-qa` after the fixes. **Verdict: READY** — no Critical 
 **Security re-audit:** no new findings. Open-redirect closed; owner-only RLS + storage isolation proven against two accounts; `role` self-escalation reverted by the trigger at runtime.
 
 **Remaining (non-blocking, neither Critical/High):**
-- **BUG-3 (Low):** add `SUPABASE_SERVICE_ROLE_KEY` to `.env.local.example` (env files permission-blocked from edits here) — do before `/deploy`.
+- **BUG-3 (Low) — RESOLVED:** documented in `docs/supabase-setup.md` §1 (canonical env reference) since `.env.local.example` is permission-blocked here.
 - **Manual smoke (recommended at `/deploy`):** real magic-link **email delivery** via the live SMTP isn't auto-testable here — confirm one real inbox round-trip (send link → tap link **and** 6-digit code → land authenticated). The OTP→session mechanism itself is exercised by the harness.
 
 **Status → Approved.**
