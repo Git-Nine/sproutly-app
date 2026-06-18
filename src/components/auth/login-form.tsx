@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { Loader2, Mail } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { emailSchema, otpSchema, type EmailValues, type OtpValues } from '@/lib/profile'
+import { safeReturnTo } from '@/lib/safe-return-to'
 import { Logo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,7 +60,8 @@ export function LoginForm({
       return
     }
     // Full reload so the new session cookie is picked up by the server everywhere.
-    window.location.href = returnTo
+    // Re-sanitize at the redirect site (defense-in-depth against open redirect).
+    window.location.href = safeReturnTo(returnTo)
   }
 
   async function resend() {

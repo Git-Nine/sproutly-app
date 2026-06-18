@@ -1,12 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { LoginForm } from '@/components/auth/login-form'
-
-/** Only allow internal redirect targets (prevents open-redirect via ?returnTo=). */
-function safeReturnTo(value?: string): string {
-  if (value && value.startsWith('/') && !value.startsWith('//')) return value
-  return '/'
-}
+import { safeReturnTo } from '@/lib/safe-return-to'
 
 export default async function LoginPage({
   searchParams,

@@ -1,12 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabaseEnv } from './env'
-
-/** Only allow internal redirect targets (prevents open-redirect via ?returnTo=). */
-function safeReturnTo(value: string | null): string {
-  if (value && value.startsWith('/') && !value.startsWith('//')) return value
-  return '/'
-}
+import { safeReturnTo } from '@/lib/safe-return-to'
 
 /**
  * Runs on every request (from the root proxy). Two jobs:

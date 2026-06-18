@@ -303,5 +303,20 @@ The four carried-forward security ACs (own-row RLS read/edit + cross-user denial
 ### Production-ready decision
 ⛔ **NOT READY.** BUG-1 is a confirmed, exploitable open redirect in the authentication flow — small fix, but it should not ship. Fix BUG-1 (and ideally BUG-3/BUG-5), then re-run `/qa`. The Low items and the runtime-AC gap are non-blocking individually but the two-account runtime verification should be closed before `/deploy`.
 
+### Post-QA fixes (2026-06-18)
+
+Applied after the QA pass above (branch `proj-2-qa`), with explicit approval for the auth-flow change:
+
+- **BUG-1 (High) — FIXED.** Centralized the redirect guard in `src/lib/safe-return-to.ts` (rejects protocol-relative `//`, the `/\` backslash bypass, any backslash, and control characters) and wired it into all four call sites: `login/page.tsx`, `login-form.tsx` (re-sanitized at the `window.location` redirect, defense-in-depth), `auth/callback/route.ts`, and `supabase/middleware.ts`. Removed the four duplicated copies. Covered by `src/lib/safe-return-to.test.ts` (16 cases incl. the `/\evil.com` exploit).
+- **BUG-2 (Low) — FIXED.** `avatar-uploader.tsx` now persists `avatar_path` to the row immediately, atomic with the storage mutation (upload → set path; clear path → remove file), so an abandoned form can't leave the row pointing at a missing object. Toasts updated ("Picture updated." / "Picture removed.").
+- **BUG-4 (Low) — FIXED.** Migrated lint to ESLint 9 flat config (`eslint.config.mjs` using `@next/eslint-plugin-next`'s `core-web-vitals`); removed `.eslintrc.json`; `lint` script is now `eslint .`. `npm run lint` runs clean.
+- **BUG-5 (Low) — FIXED.** `handleLogout` wrapped in try/catch — resets the loading state and toasts on a failed `signOut` instead of spinning forever.
+- **BUG-3 (Low) — MANUAL (still open).** `.env.local.example` is permission-blocked from edits in this environment. **Operator action:** add a line `SUPABASE_SERVICE_ROLE_KEY=your-service-role-key` (dummy value) to `.env.local.example`.
+- **BUG-6 (observation) — ACCEPTED, no change.** The >50-char display-name error stays unreachable via the UI by design (`maxLength={50}` + zod `.max(50)` + DB CHECK). Defense is adequate; flagged for AC traceability only.
+
+**Verification (proj-2-qa):** `tsc --noEmit` clean · `next build` green (6 routes + Proxy) · `npm run lint` clean · unit/integration **34/34** (incl. 16 new `safe-return-to` cases).
+
+**Still open before `/deploy`:** re-run `/qa` to confirm the verdict, BUG-3 manual add, and the **two-account runtime verification** of the four carried-forward security ACs (now unblocked by SMTP) — either a manual two-account pass or a seeded-auth E2E harness (`auth.admin.generateLink` → `verifyOtp`).
+
 ## Deployment
 _To be added by /deploy_

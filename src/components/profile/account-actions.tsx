@@ -24,8 +24,14 @@ export function AccountActions() {
 
   async function handleLogout() {
     setLoggingOut(true)
-    await supabase.auth.signOut()
-    window.location.href = '/login'
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+      window.location.href = '/login'
+    } catch {
+      toast.error('Could not log out. Please try again.')
+      setLoggingOut(false)
+    }
   }
 
   async function handleDelete() {

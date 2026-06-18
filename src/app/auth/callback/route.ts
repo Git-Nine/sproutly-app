@@ -1,11 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-
-/** Only allow internal redirect targets (prevents open-redirect via ?returnTo=). */
-function safeReturnTo(value: string | null): string {
-  if (value && value.startsWith('/') && !value.startsWith('//')) return value
-  return '/'
-}
+import { safeReturnTo } from '@/lib/safe-return-to'
 
 /**
  * Magic-link landing route. Supabase appends a PKCE `code` to this URL when the
