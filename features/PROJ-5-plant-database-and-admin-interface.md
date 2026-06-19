@@ -323,4 +323,34 @@ Full E2E (58) + unit (106) suites green. PROJ-2/3/4 routes, RLS isolation, and s
 - BUG-1/BUG-2 are best handled in PROJ-6/7/8 (where `image_url` is first rendered), not as PROJ-5 blockers.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-06-20
+**Platform:** Vercel (auto-deploy from `main` branch — same project as PROJ-1/2/3/4)
+**Commit:** `429cdf6` (pushed to `main` 2026-06-20)
+**Tag:** `v1.5.0-PROJ-5`
+
+### Pre-deploy gates (all green)
+- `npm run build` clean (Turbopack, Next 16.1.1); `/admin/plants`, `/admin/plants/new`, `/admin/plants/[id]/edit` compile as dynamic server routes
+- `npm run lint` clean · `tsc --noEmit` clean
+- Unit 106/106 ✓ · E2E 58/58 ✓ (no regressions in PROJ-2/3/4)
+- No secrets in the staged diff (service-role key only referenced via `process.env`, never a literal)
+
+### Database changes applied to production Supabase (by operator, before deploy)
+1. `20260620100000_proj5_plants.sql` — `public.plants` table, RLS policies, `public.is_admin()` helper, `idx_plants_common_name`, `updated_at` trigger
+2. `20260620100100_proj5_grant_plants_privileges.sql` — table-level GRANTs for `authenticated` + `service_role`
+3. Admin promotion: `update public.users set role = 'admin' where email = 'hi@janine-prange.de';` (privileged context, per PROJ-1)
+4. `npm run seed:plants` — initial catalogue (14 plants) loaded
+
+No new environment variables (reuses the existing Supabase URL/anon/service-role keys). No Realtime publication needed (admin UI refreshes via `router.refresh()`).
+
+### Env vars
+No changes — `.env.local.example` already documents `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` from prior features.
+
+### Post-deploy verification (recommended — manual)
+- [ ] Sign in as the admin account → home shows the "Plants" header link → `/admin/plants` loads with the 14 seeded plants
+- [ ] Search + maintenance/sun filters narrow the list; add a plant; edit it; delete one (mandatory-replacement dialog)
+- [ ] Sign in as a non-admin → `/admin/plants` redirects to `/scans`; no "Plants" link visible
+- [ ] No browser-console or Vercel function-log errors
+
+### Carried forward
+- **BUG-1 / BUG-2** (`image_url` validation, both Low) → **PROJ-6** (see `INDEX.md` Build Order notes + QA Test Results).

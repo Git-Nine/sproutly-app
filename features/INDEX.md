@@ -19,7 +19,7 @@
 | PROJ-2 | User Authentication & Profile | Approved | P0 | PROJ-1 | [PROJ-2](PROJ-2-user-authentication-and-profile.md) | 2026-06-17 |
 | PROJ-3 | Photo Upload & Space Scan | Deployed | P0 | PROJ-1, PROJ-2 | [PROJ-3](PROJ-3-photo-upload-and-space-scan.md) | 2026-06-17 |
 | PROJ-4 | Environmental Data Enrichment | Deployed | P0 | PROJ-3 | [PROJ-4](PROJ-4-environmental-data-enrichment.md) | 2026-06-17 |
-| PROJ-5 | Plant Database & Admin Interface | Approved | P0 | PROJ-1, PROJ-2 | [PROJ-5](PROJ-5-plant-database-and-admin-interface.md) | 2026-06-17 |
+| PROJ-5 | Plant Database & Admin Interface | Deployed | P0 | PROJ-1, PROJ-2 | [PROJ-5](PROJ-5-plant-database-and-admin-interface.md) | 2026-06-17 |
 | PROJ-6 | Rule-Based Plan Generation | Roadmap | P0 | PROJ-3, PROJ-4, PROJ-5 | — | 2026-06-17 |
 | PROJ-7 | Plan Review & Acceptance | Roadmap | P0 | PROJ-6 | — | 2026-06-17 |
 | PROJ-8 | Shopping List & Deep Links | Roadmap | P0 | PROJ-7 | — | 2026-06-17 |
