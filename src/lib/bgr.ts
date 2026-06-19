@@ -60,12 +60,15 @@ function extractSoilType(response: unknown): SoilType | null {
   for (const result of data.results) {
     const attrs = result.attributes ?? {}
 
-    // Try known BÜK200 attribute fields in priority order.
-    // Verify exact field names against a live response before production deploy.
+    // BÜK200 Identify returns layer-dependent attribute names.
+    // Verified against live response 2026-06-19: CC-sheet layers use 'Legendentext'
+    // and 'Legende' (mixed-case). BKTYP/SG_KURZ/BGRUP kept as fallbacks for other layers.
     const raw =
+      attrs['Legendentext'] ??
       attrs['BKTYP'] ??
       attrs['SG_KURZ'] ??
       attrs['Bodentyp'] ??
+      attrs['Legende'] ??
       attrs['LEGENDE'] ??
       attrs['BGRUP']
 

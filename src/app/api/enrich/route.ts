@@ -42,9 +42,11 @@ const DWD_URLS = {
   frostDays:     `${DWD_BASE}/frost_days/grids_germany_multi_annual_frost_days_1991-2020_17.asc.gz`,
 } as const
 
-// DWD grids store values in tenths of the unit (°C×10, mm×10); frost days are whole.
-// VERIFY against a real file's header/README before production deploy.
-const DWD_SCALE = { precipitation: 10, minTemp: 10, frostDays: 1 } as const
+// Verified against live file samples 2026-06-19:
+//   precipitation: values are actual mm (NW Germany edge = 669-692, plausible for ~700 mm/yr) → scale 1
+//   minTemp:       values are °C×10 (NW Germany edge = 73, → 7.3 °C, plausible for maritime min) → scale 10
+//   frostDays:     whole-number day counts → scale 1
+const DWD_SCALE = { precipitation: 1, minTemp: 10, frostDays: 1 } as const
 
 const CLIMATE_PERIOD = '1991–2020'
 const NOMINATIM_TIMEOUT_MS = 5_000

@@ -94,7 +94,7 @@ function mockDwdSuccess() {
   mockFetchGrid.mockResolvedValue(fakeGrid)
   // Called 3× (precipitation, minTemp, frostDays) via gridValueAt
   mockGridValueAt
-    .mockReturnValueOnce(6400)  // precipitation: 6400 raw → 640 mm/yr
+    .mockReturnValueOnce(640)   // precipitation: 640 mm raw (scale=1) → 640 mm/yr
     .mockReturnValueOnce(-85)   // minTemp: -85 raw → -8.5 °C
     .mockReturnValueOnce(45)    // frostDays: 45 days/yr
 }
