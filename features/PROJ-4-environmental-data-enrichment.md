@@ -400,8 +400,30 @@ Remaining pre-deploy verification items (external API response verification) doc
 ### Pre-deploy verification items (status at deploy time)
 - DWD grid URLs, BGR attribute fields, DWD CRS, DWD scale factors — **not yet verified against live external APIs** (requires a real scan in a German postcode to observe first enrichment response). Monitor Vercel function logs after first production enrichment to confirm values are correct.
 
+### Post-deploy production bugs (all fixed 2026-06-19)
+
+**BUG-P1 (Critical): Enrichment stuck at `pending` forever**
+Cause: stale-result guard compared `requested_at` as strings — PostgREST returns `+00:00` suffix but `new Date().toISOString()` produces `Z`. Equal timestamps compared as unequal strings, so the guard always returned `false` and enrichment was silently discarded.
+Fix: compare via `new Date(x).getTime() === new Date(y).getTime()`.
+
+**BUG-P2 (High): All DWD fields unavailable — wrong period code in URLs**
+Cause: DWD URLs used abbreviated period code `9120`; actual format is `1991-2020`. Also `air_temperature_min` directory but `air_temp_min` in the filename.
+Fix: corrected all three DWD URLs.
+
+**BUG-P3 (High): All DWD fields unavailable — grid CRS mismatch**
+Cause: DWD grids are in EPSG:31467 (Gauß-Krüger Zone 3) — projected coordinates in metres (`xllcorner ≈ 3,280,414`). `gridValueAt` treated them as WGS84 degrees, so every lat/lng lookup was out of range.
+Fix: added `wgs84ToGK3()` to `dwd-grid.ts` — Transverse Mercator on Bessel 1841, Zone 3 (CM=9°E, false easting=3,500,000). Detection by `xllcorner > 1,000,000`; accuracy ~50–100 m, well within 1 km cells. Verified: Chemnitz (50.83°N, 12.92°E) → col 495, row 463.
+
+**BUG-P4 (Medium): Soil type always unavailable — BGR field name mismatch**
+Cause: `extractSoilType` looked up `LEGENDE` (uppercase) and `BGRUP`; live BÜK200 Identify response uses `Legendentext` and `Legende` (mixed-case). No field matched, so `raw` was always `undefined`.
+Fix: added `Legendentext` (first priority) and `Legende` to the attribute lookup list. `Legendentext` contains the German description (e.g. "…verkipptem *Lehm…") which the existing regex correctly maps to 'loam'.
+
+**BUG-P5 (Medium): Rainfall displayed 10× too low**
+Cause: `DWD_SCALE.precipitation` was 10, assuming mm×10 storage. Live file inspection (NW Germany edge values = 669–692) confirmed values are actual mm, not tenths.
+Fix: `DWD_SCALE.precipitation` changed from `10` to `1`. Temperature (°C×10) and frost-day (whole) scales remain correct.
+
 ### Post-deploy checklist
 - [x] `npm run build` clean
 - [x] `npm run lint` clean (added `.claude/`/`.codex/`/`.agents/` to ESLint ignore)
 - [x] Pushed to `main` → Vercel auto-deploy triggered
-- [ ] Verify enrichment runs end-to-end on a real scan (requires testing in production)
+- [x] Verified enrichment end-to-end in production — all three sources (BGR soil, DWD climate, DWD frost days) returning real values for postcode 09123 ✅
