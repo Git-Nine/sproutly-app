@@ -1,8 +1,8 @@
 # PROJ-4: Environmental Data Enrichment
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-06-19
 
 ## Dependencies
 - Requires: **PROJ-3 (Photo Upload & Space Scan)** — enrichment augments a *saved* scan. It reads the scan's `postcode` (always present) and optional `lat`/`lng` (from photo EXIF GPS), and writes the derived environmental data back against that scan.
@@ -85,12 +85,14 @@
 
 ## Open Questions
 <!-- Unresolved questions from the spec interview. Close them in /refine or /architecture when answered. -->
-- [ ] **BGR soil endpoint (BLOCKING — carried from INDEX).** Which BGR service/dataset returns soil type by coordinate for Germany, in what format (WMS/WFS/REST?), at what resolution, and with what usage limits? If no usable point-query exists, what's the fallback (a coarser soil map, a different open dataset)? Design soil behind a swappable seam until resolved.
-- [ ] **DWD climate access.** Which DWD product gives climate **normals** (avg annual rainfall, typical annual min temp, frost window) by location — gridded data vs nearest-station, and how is a location mapped to a value? Access/format/limits?
-- [ ] **Hardiness zone source.** Is there an authoritative German/European hardiness-zone dataset to query, or should the zone be **derived** from the DWD annual-minimum-temperature normal (zone is a function of min temp)? Deriving it removes a third integration — confirm at `/architecture`.
-- [ ] **Caching / shared reference data.** Soil, zone, and climate are identical for a given location — should results be cached (by coordinate or postcode) across scans/users to cut external calls? (Architecture.)
-- [ ] **Rate limiting on enrichment + geocode endpoints.** Carries PROJ-3's INFO-1 ("Nominatim at scale") and extends it to BGR/DWD — add a per-user throttle and/or self-host before scaling beyond the v1 beta.
-- [ ] **Optional soil pH band.** Include a coarse pH band if BGR returns it cheaply, or drop entirely for v1? (Confirm against PROJ-6's actual needs.)
+- [x] **BGR soil endpoint (BLOCKING — carried from INDEX).** **Resolved (/architecture + deep-research):** BGR BÜK200 ArcGIS MapServer at `services.bgr.de/arcgis/rest/services/boden/buek200/MapServer` exposes a REST `Identify` operation — point coordinate submitted directly, soil attributes returned without downloading the full dataset. Resolution is 1:200,000 (regional, not garden-plot). Communicate to users as "regional estimate." Source sits behind a swappable seam as specified.
+- [x] **DWD climate access.** **Resolved (/architecture + deep-research):** Three distinct gridded products confirmed at `opendata.dwd.de/climate_environment/CDC/grids_germany/multi_annual/`: `precipitation/`, `air_temperature_min/`, and `frost_days/`. Format: compressed ASCII grids (`.asc.gz`), not a REST API — downloaded and parsed server-side. ~1 km resolution. Four 30-year WMO normal periods; use 1991–2020. See Tech Design for caching approach.
+- [x] **Hardiness zone source.** **Resolved (/architecture + deep-research):** No queryable zone API exists from DWD (only static maps). German Winterhärtezonen are defined by DWD using the mean absolute annual minimum temperature — the exact value in the `air_temperature_min/` grid already fetched for climate. Zone is derived via a lookup table. Third integration eliminated.
+- [x] **Caching / shared reference data.** **Resolved (/architecture):** v1 — no cross-user caching. Each enrichment fetches independently. Fine at beta scale; same location re-fetches are cheap. Shared location cache is a v2 optimisation.
+- [ ] **Rate limiting on enrichment + geocode endpoints.** Carries PROJ-3's INFO-1 ("Nominatim at scale") — extend to BGR/DWD. Add a per-user throttle on `/api/enrich` before scaling beyond the v1 beta. Deferred to scaling review.
+- [x] **Optional soil pH band.** **Resolved (/architecture):** Drop for v1. pH band not required for PROJ-6's rule engine based on the planned data set; revisit if PROJ-6 proves it needs it.
+- [ ] **DWD grid CRS.** The research refuted the claim that DHDN Gauss-Krüger reprojection is required, but CRS should be verified against the `.asc` file header at implementation time. `proj4` is the fallback library if reprojection proves necessary.
+- [ ] **BGR soil attribute field mapping.** Which attribute field in the BÜK200 Identify response contains the soil type code, and what is the code-to-{sand/loam/clay/silt/peat} mapping? Verify at implementation by inspecting a live response.
 
 ## Decision Log
 <!-- Record of conscious decisions made and why. Added to by /write-spec and /architecture. -->
@@ -112,13 +114,162 @@
 <!-- Added by /architecture -->
 | Decision | Rationale | Date |
 |----------|-----------|------|
-| _To be added by `/architecture`_ | | |
+| Separate **`scan_enrichment` table** (not columns on `scans`) | Cleanly separates user-entered data from system-derived data; per-field status columns fit naturally; easy to invalidate on location change; cascades on scan delete | 2026-06-19 |
+| **Client fires `POST /api/enrich` after scan save** (fire-and-forget); API uses Next.js `after()` to return 202 immediately and continue processing | Save redirect is never blocked by enrichment latency; `after()` keeps enrichment logic server-side and avoids a client timeout | 2026-06-19 |
+| **DWD grids: download on first request, parse server-side, module-level in-memory cache** | Grid files are static climate normals — they don't change. Fluid Compute instance reuse means warm-cache hits are the common case; simpler than pre-storing in Blob for v1 | 2026-06-19 |
+| **Hardiness zone derived from DWD `air_temperature_min` value** via a lookup table | Eliminates a third external integration; DWD defines Winterhärtezonen exactly this way; the min-temp value is already fetched for climate data | 2026-06-19 |
+| **Supabase Realtime subscription** on the `scan_enrichment` row for pending → loaded UI transition | Zero polling; instant update when enrichment writes; Supabase Realtime already available in the client | 2026-06-19 |
+| **`requested_at` timestamp stale-result guard** | Stored on the enrichment row before async processing begins; a slower earlier request discards its results if `requested_at` no longer matches — prevents a stale response overwriting a newer one on rapid location edits | 2026-06-19 |
+| **Retry re-runs all three sources** (not just failed ones) | Simpler — one code path, same enrichment logic; three small API calls are cheap to repeat; v1 doesn't justify the complexity of per-field retry tracking | 2026-06-19 |
+| **Climate period: 1991–2020** stored as a field on the enrichment row | Most recent WMO 30-year normal; storing the period makes future upgrades (e.g. 2001–2030) auditable without a migration | 2026-06-19 |
+| **v1: no cross-user location caching** | Fine at beta scale; same location re-fetches are cheap; shared location cache is a v2 optimisation | 2026-06-19 |
+| BGR resolution (1:200,000) surfaced to users as **"regional estimate"** footnote | Manages expectations; soil types reflect broad regional associations, not a specific garden plot; no false precision | 2026-06-19 |
 
 ---
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Screens & Components
+
+PROJ-4 adds one new UI section to the existing scan detail page. No new pages are needed.
+
+```
+/scans/{id}  (scan detail — modified from PROJ-3)
+├── Photo + captured fields  (existing, unchanged)
+│
+├── ── NEW ── "Your Conditions" card
+│   ├── Skeleton / "Gathering conditions…" spinner
+│   │   └── shown while enrichment is pending or has never run
+│   │
+│   ├── Soil chip        e.g. "Loam"  · or "Unavailable"
+│   ├── Zone chip        e.g. "Zone 7b" · or "Unavailable"
+│   ├── Rainfall         e.g. "640 mm/yr"
+│   ├── Annual minimum   e.g. "−8 °C"
+│   ├── Frost days       e.g. "~45 days/yr"
+│   │
+│   ├── Footnote: "Regional estimate — soil data at 1:200,000 scale"
+│   │   (manages the BGR coarseness caveat for Thomas)
+│   │
+│   └── [ Retry ] button  — shown only when ≥1 value is "unavailable"
+│
+├── [ Generate plan → ]  (existing disabled seam — PROJ-6 wires this)
+├── [ Edit ]
+└── [ Delete ]
+```
+
+Built entirely from existing shadcn components (`card`, `badge`, `skeleton`, `button`, `tooltip`). No new UI library.
+
+---
+
+### Data Model
+
+**New table: `scan_enrichment`** — one row per scan (1:1), following PROJ-1's owner-only RLS pattern. Keeps user-entered scan data separate from system-derived environmental data.
+
+```
+scan_enrichment
+──────────────────────────────────────────────────────
+id                  Unique row ID
+scan_id             FK → scans (CASCADE DELETE)
+user_id             Owner — for RLS (user_id = auth.uid())
+status              Overall: pending | complete | partial | failed
+requested_at        Set when enrichment starts — stale-result guard
+
+Soil
+  soil_type         sand | loam | clay | silt | peat (nullable)
+  soil_status       pending | success | unavailable
+
+Climate
+  rainfall_mm       Annual precipitation in mm (nullable integer)
+  annual_min_temp   Annual absolute minimum temperature °C (nullable)
+  frost_days        Days per year with min temp < 0°C (nullable integer)
+  climate_status    pending | success | unavailable
+  climate_period    30-year normal period used, e.g. "1991–2020"
+
+Hardiness (derived — no separate source)
+  hardiness_zone    Zone label e.g. "7b" (nullable)
+  zone_status       pending | success | unavailable
+
+Metadata
+  location_basis    "gps" | "postcode_centroid"
+  created_at / updated_at
+```
+
+---
+
+### Enrichment Flow
+
+```
+User saves a scan (existing PROJ-3 flow)
+         ↓
+Client receives "save succeeded" → redirects to scan detail
+Client fires POST /api/enrich  (fire-and-forget — no await)
+         ↓
+API route: returns 202 immediately
+           uses Next.js after() to continue in background:
+         ↓
+    1. Upsert scan_enrichment → status: pending, requested_at: now
+    2. Resolve coordinate
+         GPS present → use it
+         No GPS → geocode postcode via existing /api/geocode
+         Outside Germany → mark all unavailable, done
+    3. Fire three lookups in parallel:
+         A. BGR BÜK200 REST Identify  → soil_type
+         B. DWD air_temperature_min grid → annual_min_temp
+                                         → derive hardiness_zone via lookup table
+         C. DWD precipitation grid   → rainfall_mm
+         D. DWD frost_days grid      → frost_days
+    4. Each result written as it arrives (partial-result safe)
+    5. Check requested_at still matches — discard if stale (location changed)
+    6. Set overall status: complete | partial | failed
+         ↓
+Supabase Realtime notifies the open scan detail page
+         ↓
+UI: skeleton → conditions summary (per-field, with "unavailable" where failed)
+```
+
+**Re-enrichment on location change:** the scan edit form calls `POST /api/enrich` again after saving if the postcode or photo GPS changed. The `requested_at` guard handles any in-flight race.
+
+**Retry:** the [ Retry ] button calls `POST /api/enrich` with `retry: true`. The API re-runs all three sources and overwrites only the fields where the new attempt succeeds.
+
+---
+
+### External Integrations
+
+| Source | Provides | Access | Research confidence |
+|---|---|---|---|
+| BGR BÜK200 ArcGIS REST | Soil type by coordinate | `POST /identify` to `services.bgr.de/arcgis/rest/services/boden/buek200/MapServer` — one HTTPS call, no file download | ✅ Confirmed 3-0 |
+| DWD CDC `precipitation/` | Annual rainfall mm | Download `.asc.gz` grid, decompress with Node `zlib`, parse ASCII, read cell at coordinate | ✅ Confirmed 3-0 |
+| DWD CDC `air_temperature_min/` | Annual min temp °C | Same grid approach | ✅ Confirmed 3-0 |
+| DWD CDC `frost_days/` | Frost-day count | Same grid approach | ✅ Confirmed 3-0 |
+| Hardiness zone | Zone label e.g. "7b" | Derived from annual_min_temp via a lookup table — no third API | ✅ DWD defines zones this way |
+| Nominatim (existing `/api/geocode`) | Postcode → centroid lat/lng | Reused as-is from PROJ-3 | Existing |
+
+**DWD grid caching:** parsed grids are held in a module-level in-memory Map keyed by filename. Fluid Compute's instance reuse means warm hits skip the download. The 1991–2020 period files are fetched once per function instance lifetime.
+
+---
+
+### New API Route
+
+**`POST /api/enrich`** (one new route, same pattern as existing `/api/geocode`):
+- Auth-gated — unauthenticated requests → 401
+- Validates caller owns the requested scan (RLS-consistent check)
+- Orchestrates all sources in parallel; writes partial results as each resolves
+- Returns 202; processing continues via `after()`
+- Accepts optional `retry: true` flag
+
+---
+
+### No New Packages Required
+
+| Concern | Tool |
+|---|---|
+| `.asc.gz` decompression | Node.js built-in `zlib` |
+| ASCII grid parsing | Plain string/number parsing — no library |
+| BGR REST call | `fetch` — already used throughout |
+| Supabase Realtime | Supabase client — already installed |
+| Response validation | Zod — already installed |
+| CRS reprojection (if needed) | `proj4` — add only if the .asc header confirms a non-WGS84 projection at implementation |
 
 ## QA Test Results
 _To be added by /qa_

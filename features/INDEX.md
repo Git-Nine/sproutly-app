@@ -18,7 +18,7 @@
 | PROJ-1 | Supabase Infrastructure Setup | Approved | P0 | None | [PROJ-1](PROJ-1-supabase-infrastructure-setup.md) | 2026-06-17 |
 | PROJ-2 | User Authentication & Profile | Approved | P0 | PROJ-1 | [PROJ-2](PROJ-2-user-authentication-and-profile.md) | 2026-06-17 |
 | PROJ-3 | Photo Upload & Space Scan | Deployed | P0 | PROJ-1, PROJ-2 | [PROJ-3](PROJ-3-photo-upload-and-space-scan.md) | 2026-06-17 |
-| PROJ-4 | Environmental Data Enrichment | Planned | P0 | PROJ-3 | [PROJ-4](PROJ-4-environmental-data-enrichment.md) | 2026-06-17 |
+| PROJ-4 | Environmental Data Enrichment | Architected | P0 | PROJ-3 | [PROJ-4](PROJ-4-environmental-data-enrichment.md) | 2026-06-17 |
 | PROJ-5 | Plant Database & Admin Interface | Roadmap | P0 | PROJ-1, PROJ-2 | — | 2026-06-17 |
 | PROJ-6 | Rule-Based Plan Generation | Roadmap | P0 | PROJ-3, PROJ-4, PROJ-5 | — | 2026-06-17 |
 | PROJ-7 | Plan Review & Acceptance | Roadmap | P0 | PROJ-6 | — | 2026-06-17 |
