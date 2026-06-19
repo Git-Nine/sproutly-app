@@ -139,7 +139,22 @@ export async function runEnrichment({
   requestedAt: string
 }) {
   const admin = createAdminClient()
+  try {
+    await _runEnrichment(admin, scan, userId, requestedAt)
+  } catch (err) {
+    console.error('[enrich] unhandled error — marking failed:', err)
+    try {
+      await writeResult(admin, scan.id, userId, requestedAt, { status: 'failed' })
+    } catch { /* ignore — best effort */ }
+  }
+}
 
+async function _runEnrichment(
+  admin: ReturnType<typeof createAdminClient>,
+  scan: { id: string; user_id: string; postcode: string | null; lat: number | null; lng: number | null },
+  userId: string,
+  requestedAt: string,
+) {
   // Resolve coordinate: use GPS if present, else forward-geocode the postcode.
   let lat = scan.lat
   let lng = scan.lng
@@ -280,7 +295,10 @@ async function isStillCurrent(
     .select('requested_at')
     .eq('scan_id', scanId)
     .maybeSingle()
-  return data?.requested_at === requestedAt
+  if (!data?.requested_at) return false
+  // Compare by numeric timestamp — PostgREST returns "+00:00" suffix while
+  // new Date().toISOString() produces "Z". Same instant, different strings.
+  return new Date(data.requested_at).getTime() === new Date(requestedAt).getTime()
 }
 
 type EnrichmentFields = {
