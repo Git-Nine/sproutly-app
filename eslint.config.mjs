@@ -6,7 +6,7 @@ import next from '@next/eslint-plugin-next'
 // Run with `npm run lint` (eslint .).
 const eslintConfig = [
   {
-    ignores: ['.next/**', 'node_modules/**', 'playwright-report/**', 'test-results/**', 'blob-report/**'],
+    ignores: ['.next/**', 'node_modules/**', 'playwright-report/**', 'test-results/**', 'blob-report/**', '.claude/**', '.codex/**', '.agents/**'],
   },
   next.configs['core-web-vitals'],
 ]
