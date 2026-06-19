@@ -1,8 +1,8 @@
 # PROJ-4: Environmental Data Enrichment
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-19 (Frontend built — ConditionsSummary component + scan form enrichment trigger)
+**Last Updated:** 2026-06-19 (Backend built — migration, API route, DWD grid parser, BGR client, 20/20 unit tests)
 
 ## Dependencies
 - Requires: **PROJ-3 (Photo Upload & Space Scan)** — enrichment augments a *saved* scan. It reads the scan's `postcode` (always present) and optional `lat`/`lng` (from photo EXIF GPS), and writes the derived environmental data back against that scan.
@@ -270,6 +270,31 @@ UI: skeleton → conditions summary (per-field, with "unavailable" where failed)
 | Supabase Realtime | Supabase client — already installed |
 | Response validation | Zod — already installed |
 | CRS reprojection (if needed) | `proj4` — add only if the .asc header confirms a non-WGS84 projection at implementation |
+
+## Implementation Notes (Backend)
+
+### Files Created
+- `supabase/migrations/20260619100000_proj4_scan_enrichment.sql` — `scan_enrichment` table, RLS (4 policies), trigger, index
+- `src/lib/dwd-grid.ts` — download, decompress (Node `zlib`), parse `.asc.gz` grids, module-level cache, point lookup
+- `src/lib/bgr.ts` — BGR BÜK200 ArcGIS REST Identify client, KA5 abbreviation → soil type mapper
+- `src/app/api/enrich/route.ts` — `POST /api/enrich` handler + exported `runEnrichment` orchestrator (after(), stale guard, partial results, hardiness derivation)
+- `src/app/api/enrich/route.test.ts` — 20 unit tests (7 HTTP-layer, 13 enrichment-logic), all pass
+
+### Files Modified
+- `src/lib/scans.ts` — added `ScanEnrichment` type and field-status enums
+- `src/components/scans/conditions-summary.tsx` — already created by frontend build
+- `src/app/scans/[id]/page.tsx` — already modified by frontend build
+
+### Deviations from Tech Design
+- Hardiness zone derives as a single letter ('5'–'10'), not letter+subzone ('7b'). DWD data is not granular enough for sub-zones in v1; update lookup table when/if sub-zone data is sourced.
+- `z.SafeParseReturnType` unavailable in Zod v4; replaced with `ReturnType<typeof bodySchema.safeParse>` in the route.
+
+### Pre-Deploy Verification Required
+1. **DWD grid URLs** — verify period code `9120` and file index `17` against the live directory listing at `opendata.dwd.de/…/multi_annual/`
+2. **BGR attribute fields** — inspect a live Identify response to confirm which field (`BKTYP`, `SG_KURZ`, etc.) carries the soil type code and verify the KA5 regex patterns in `bgr.ts`
+3. **DWD grid CRS** — check `xllcorner`/`yllcorner` in a real `.asc` header; if they look like projected coordinates (large integers), add `proj4` reprojection
+4. **DWD scale factors** — confirm precipitation and temperature values are stored ×10 (the standard for these products)
+5. **Apply migration** — run `supabase/migrations/20260619100000_proj4_scan_enrichment.sql` in the Supabase dashboard SQL editor
 
 ## QA Test Results
 _To be added by /qa_
