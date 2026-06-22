@@ -343,5 +343,16 @@ Re-ran `/qa` on `proj-2-qa` after the fixes. **Verdict: READY** — no Critical 
 
 **Status → Approved.**
 
+## Post-Deploy Fix — User Deletion (2026-06-22)
+
+**Bug (Critical, found during PROJ-6 QA):** account deletion (`/api/account/delete`) and all GDPR erasure were **broken in production**. PROJ-1's `on_auth_user_deleted` trigger (`handle_user_deletion`) direct-deletes from `storage.objects`, which Supabase now forbids via `storage.protect_delete()` ("Direct deletion from storage tables is not allowed. Use the Storage API instead."). Every `delete from auth.users` aborted → the route returned 500, and the QA RLS harnesses silently failed to clean up test users (96 had accumulated).
+
+**Fix:**
+- `supabase/migrations/20260622110000_proj2_fix_user_deletion_drop_storage_trigger.sql` — drops the trigger + `handle_user_deletion()`. *(Applied to production 2026-06-22, verified via MCP: trigger/function both gone.)*
+- `src/app/api/account/delete/route.ts` — now removes the user's photos from the private `photos` bucket via the **Storage API** (recursive list under `{user_id}/`, then `remove()`) **before** deleting the user; best-effort so a storage hiccup never blocks deletion. The `public.users`/`scans`/`plans` cascade still occurs via FK `ON DELETE CASCADE` (never depended on the trigger).
+- `route.test.ts` — 6 tests incl. recursive removal, no-files skip, storage-failure tolerance, auth gate, caller-id, 500-on-delete-failure.
+
+**Verification:** unit 133/133 ✓, `tsc`/`lint`/`build` ✓. Accumulated test users cleared post-fix. Recommended manual smoke at deploy: delete a throwaway account end-to-end and confirm both the row and its photos are gone.
+
 ## Deployment
 _To be added by /deploy_
