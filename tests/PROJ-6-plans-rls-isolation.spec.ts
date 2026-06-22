@@ -94,7 +94,8 @@ test.describe('PROJ-6 plans — owner-only RLS + admin reassignment (two real ac
     for (const u of stale) await admin.auth.admin.deleteUser(u.id)
   }
   async function purgePlants() {
-    await admin.from('plants').delete().like('latin_name', `ZZ-QA6-${stamp}-%`)
+    // Broad sweep (any run's stamp) so a leftover from a prior run also gets cleaned.
+    await admin.from('plants').delete().like('latin_name', 'ZZ-QA6-%')
   }
 
   async function seed(label: string): Promise<SeededUser> {
@@ -133,8 +134,11 @@ test.describe('PROJ-6 plans — owner-only RLS + admin reassignment (two real ac
 
   test.afterAll(async () => {
     if (!ready) return
+    // Order matters: purge users FIRST so the cascade (scans → plans → plan_plants)
+    // clears the references, otherwise the RESTRICT FK on plan_plants.plant_id blocks
+    // deleting the replacement plant and it leaks into the catalogue.
+    await purgeUsers()
     await purgePlants()
-    await purgeUsers() // cascades scans → plans → plan_plants
   })
 
   test('admin promotion took effect', async () => {
