@@ -1,6 +1,6 @@
 # PROJ-8: Shopping List & Deep Links
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-23
 **Last Updated:** 2026-06-23
 
@@ -340,4 +340,26 @@ Because the list is always derived from the current plan, there is **no such thi
 - **Recommendation:** Deploy. BUG-2 (confirm Gaißmayer filtering) and BUG-3 (pre-existing PROJ-2 flaky login tests) are Low follow-ups, not blockers.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-06-23
+**Platform:** Vercel (auto-deploy from `main` — same project as PROJ-1→7)
+**Tag:** `v1.8.0-PROJ-8`
+**Commit:** `89947dc` (verified live in production by the user)
+
+### Pre-deploy gates (all green)
+- `npm run build` clean (Next 16, Turbopack); `/scans/[id]/shopping-list` compiles as a dynamic server route
+- `npm run lint` clean · `tsc --noEmit` clean
+- Full regression: `npm test` (159 unit/integration) green; `npm run test:e2e` green except the pre-existing flaky PROJ-2 login tests (BUG-3, not a PROJ-8 regression)
+- QA **Approved** — 19/19 acceptance criteria, security audit pass, no Critical/High/Medium bugs (BUG-1 fixed pre-deploy)
+
+### Infrastructure changes
+- **None.** No new env vars, packages, tables, RLS policies, or migrations — the feature is read-only over existing `plans`/`plan_plants`/`plants`. Nothing to configure on the Vercel/Supabase side.
+
+### Post-deploy verification (by the user)
+- Production build green for `89947dc`
+- Plan → "Order these plants" → shopping list loads; "Find at Pflanzmich" opens a pre-searched tab; "other shops" reveals Gaißmayer; Share works
+- No browser-console or Vercel function-log errors
+
+### Follow-ups (Low, not blocking)
+- **BUG-2:** confirm Gaißmayer's `searchword=` actually filters results (template fix if not)
+- **BUG-3:** the two flaky PROJ-2 login E2E tests — raise the E2E timeout / pre-build before the run (tracked against PROJ-2)

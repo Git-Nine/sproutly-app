@@ -27,7 +27,7 @@ Millions replace gardens with gravel and sealed surfaces believing it is the low
 | P0 (MVP) | PROJ-5 Plant Database & Admin Interface | Planned |
 | P0 (MVP) | PROJ-6 Rule-Based Plan Generation | Deployed |
 | P0 (MVP) | PROJ-7 Plan Review & Acceptance | Deployed |
-| P0 (MVP) | PROJ-8 Shopping List & Deep Links | Roadmap |
+| P0 (MVP) | PROJ-8 Shopping List & Deep Links | Deployed |
 | P1 | PROJ-9 Progress Photo Log | Roadmap |
 | P1 | PROJ-10 In-App Notifications | Planned |
 

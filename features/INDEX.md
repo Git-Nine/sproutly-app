@@ -22,7 +22,7 @@
 | PROJ-5 | Plant Database & Admin Interface | Deployed | P0 | PROJ-1, PROJ-2 | [PROJ-5](PROJ-5-plant-database-and-admin-interface.md) | 2026-06-17 |
 | PROJ-6 | Rule-Based Plan Generation | Deployed | P0 | PROJ-3, PROJ-4, PROJ-5 | [PROJ-6](PROJ-6-rule-based-plan-generation.md) | 2026-06-17 |
 | PROJ-7 | Plan Review & Acceptance | Deployed | P0 | PROJ-6 | [PROJ-7](PROJ-7-plan-review-and-acceptance.md) | 2026-06-17 |
-| PROJ-8 | Shopping List & Deep Links | Approved | P0 | PROJ-7 | [PROJ-8](PROJ-8-shopping-list-and-deep-links.md) | 2026-06-17 |
+| PROJ-8 | Shopping List & Deep Links | Deployed | P0 | PROJ-7 | [PROJ-8](PROJ-8-shopping-list-and-deep-links.md) | 2026-06-17 |
 | PROJ-9 | Progress Photo Log | Roadmap | P1 | PROJ-7 | — | 2026-06-17 |
 | PROJ-10 | In-App Notifications | Planned | P1 | PROJ-5, PROJ-6 | [PROJ-10](PROJ-10-in-app-notifications.md) | 2026-06-22 |
 
