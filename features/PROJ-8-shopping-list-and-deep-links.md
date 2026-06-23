@@ -1,6 +1,6 @@
 # PROJ-8: Shopping List & Deep Links
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-06-23
 **Last Updated:** 2026-06-23
 
@@ -299,7 +299,7 @@ Because the list is always derived from the current plan, there is **no such thi
 ### Bugs Found
 
 #### BUG-1: The primary "Find at Plantura" deep link returns zero results for botanical searches — FIXED (2026-06-23)
-- **Status:** Fixed — primary garden centre swapped to **Pflanzmich** (`https://www.pflanzmich.de/search/?queryInput={q}`), Gaißmayer kept as the alternative, in `src/lib/garden-centres.ts`. Unit tests, typecheck, and lint green. **Remaining manual check before deploy:** open the live "Find at Pflanzmich" link once in a browser to confirm result relevance (the shop is SPA/bot-protected and can't be machine-verified here).
+- **Status:** Fixed & verified — primary garden centre swapped to **Pflanzmich** (`https://www.pflanzmich.de/search/?queryInput={q}`), Gaißmayer kept as the alternative, in `src/lib/garden-centres.ts`. Unit tests, typecheck, and lint green. The live "Find at Pflanzmich" links were confirmed working in the browser (2026-06-23).
 - **Severity:** Medium
 - **Steps to Reproduce:**
   1. Open a shopping list and tap "Find at Plantura" for any plant (verified with `Lavandula angustifolia`).
@@ -336,8 +336,8 @@ Because the list is always derived from the current plan, there is **no such thi
 - **Acceptance Criteria:** 19/19 passed (BUG-1 is a product-quality concern within a passing AC, not an AC failure).
 - **Bugs Found:** 3 total (0 Critical, 0 High, 1 Medium, 2 Low). BUG-3 is pre-existing in PROJ-2, not a PROJ-8 regression.
 - **Security:** Pass — owner-only access, no new attack surface, XSS/scheme-smuggling and tabnabbing covered.
-- **Production Ready:** YES (no Critical/High bugs). BUG-1 (Medium) is strongly recommended before deploy — it's a one-line config change and directly affects the primary persona's key action.
-- **Recommendation:** Fix BUG-1 (swap the primary garden centre / search term) before deploy; BUG-2 and BUG-3 can follow.
+- **Production Ready:** YES. BUG-1 (Medium) fixed — primary swapped to Pflanzmich and the live links confirmed working in the browser (2026-06-23). No Critical/High/Medium bugs remain.
+- **Recommendation:** Deploy. BUG-2 (confirm Gaißmayer filtering) and BUG-3 (pre-existing PROJ-2 flaky login tests) are Low follow-ups, not blockers.
 
 ## Deployment
 _To be added by /deploy_
