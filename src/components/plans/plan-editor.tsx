@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Leaf, Minus, Plus, Shovel, Sprout, TriangleAlert, X } from 'lucide-react'
+import { Leaf, Minus, Plus, RotateCcw, Shovel, Sprout, TriangleAlert, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
   LAYER_DISPLAY_ORDER,
@@ -148,6 +148,16 @@ export function PlanEditor({
     saveDebounced(next)
   }
 
+  // Un-pin a hand-set quantity: the plant rejoins auto-rebalancing and returns to
+  // an engine-computed quantity for the current set.
+  function resetQty(id: string) {
+    const next = rebalance(
+      lines.map((l) => (l.plant.id === id ? { ...l, pinned: false } : l)),
+    )
+    setLines(next)
+    saveNow(next)
+  }
+
   const conditions = [
     { label: 'Sun', value: sunLabel(plan.snapshot_sun) },
     { label: 'Winter zone', value: plan.snapshot_zone != null ? `Zone ${plan.snapshot_zone}` : 'Not available' },
@@ -241,6 +251,7 @@ export function PlanEditor({
                       line={line}
                       maintenancePref={plan.snapshot_maintenance}
                       onStep={(delta) => stepQty(line.plant.id, delta)}
+                      onReset={() => resetQty(line.plant.id)}
                       onRemove={() => removePlant(line.plant.id)}
                     />
                   ))}
@@ -306,11 +317,13 @@ function EditablePlantCard({
   line,
   maintenancePref,
   onStep,
+  onReset,
   onRemove,
 }: {
   line: Line
   maintenancePref: Plan['snapshot_maintenance']
   onStep: (delta: number) => void
+  onReset: () => void
   onRemove: () => void
 }) {
   const { plant } = line
@@ -383,7 +396,19 @@ function EditablePlantCard({
             >
               <Plus className="h-4 w-4" />
             </Button>
-            {line.pinned && <span className="text-xs text-muted-foreground">set by you</span>}
+            {line.pinned && (
+              <>
+                <span className="text-xs text-muted-foreground">set by you</span>
+                <button
+                  type="button"
+                  onClick={onReset}
+                  aria-label={`Reset ${plant.common_name} quantity`}
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
+                >
+                  <RotateCcw className="h-3 w-3" /> Reset
+                </button>
+              </>
+            )}
           </div>
         </div>
       </CardContent>
