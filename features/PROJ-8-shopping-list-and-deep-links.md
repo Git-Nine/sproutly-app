@@ -1,6 +1,6 @@
 # PROJ-8: Shopping List & Deep Links
 
-## Status: In Progress
+## Status: In Review
 **Created:** 2026-06-23
 **Last Updated:** 2026-06-23
 
@@ -240,7 +240,104 @@ Because the list is always derived from the current plan, there is **no such thi
 - The list renders inside the client component (rather than server-rendered lines) so tick-off state stays co-located; the page itself is still a server component doing the fetch/auth.
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-06-23
+**App URL:** http://localhost:3000
+**Tester:** QA Engineer (AI)
+
+**Method:** code review of the new page/component/config + the reused helpers; unit tests for the deep-link logic; two-account RLS isolation + route-protection E2E; live verification of both garden-centre search URLs; full regression suite (`npm test`, `npm run test:e2e`), typecheck, lint, and production build.
+
+### Acceptance Criteria Status
+
+#### Entering the shopping list
+- [x] Own plan with ≥1 plant → "Order these plants" CTA is active (`plan-editor.tsx:319-325`, enabled `Link` when `lines.length > 0`).
+- [x] Tapping the active CTA navigates to `/scans/[id]/shopping-list`.
+- [x] Empty plan → CTA stays disabled (`plan-editor.tsx:315-318`); the screen isn't reachable via the CTA. Direct navigation shows an empty state pointing back to the plan (per the spec edge case), not another user's data.
+
+#### The list
+- [x] Every plant in the **current** plan is listed with its plan quantity as the buy quantity (`page.tsx:47-66`, `shopping-list.tsx:207-209`).
+- [x] Live-derived, no snapshot — the page reads `plan_plants` fresh on every load; edits to the plan are reflected on reopen (`page.tsx:40-66`).
+- [x] Grouped by layer via the reused `LAYER_DISPLAY_ORDER` / `plantTypePlural`, consistent with the plan view (`shopping-list.tsx:119-141`).
+- [x] Summary of total plants (Σ quantity) + distinct species (line count) shown (`shopping-list.tsx:99-105`).
+
+#### Deep links
+- [x] Primary "Find at Plantura" opens in a new tab, pre-searched for the Latin name, with `rel="noopener noreferrer"` + `target="_blank"` (`shopping-list.tsx:220-224`). *(See BUG-1: the link works mechanically but Plantura returns no results for botanical searches.)*
+- [x] "Other shops" expander reveals the alternative German garden centre, a working search link for the same plant (`shopping-list.tsx:228-250`).
+- [x] Latin names with spaces / `×` / diacritics / subspecies are correctly URL-encoded (`gardenCentreSearchUrl`, `encodeURIComponent`; covered by `src/lib/garden-centres.test.ts`).
+
+#### Honest warnings
+- [x] Per-line soil-mismatch badge shown when `soil_flag` is set (`shopping-list.tsx:212-216`); merged-line soil flag ORs correctly via `mergeDuplicateLines`.
+- [x] Plan-level "winter survival isn't guaranteed" note shown when `zone_unconfirmed` (`shopping-list.tsx:108-116`).
+- [x] Disclaimer that links are searches at independent garden centres and availability/price vary (`shopping-list.tsx:160-163`).
+
+#### Take-away & tick-off
+- [x] Share via Web Share API when supported (`shopping-list.tsx:77-85`); plain-text format matches the spec (`3 × Lavandula angustifolia (Lavender)` style, `buildShareText`).
+- [x] No Web Share → clipboard copy + toast confirmation; clipboard blocked → selectable textarea fallback (`shopping-list.tsx:86-94, 148-156`). AbortError (user dismissed sheet) is correctly swallowed.
+- [x] Tick-off is session-only `useState`; resets on reload (`shopping-list.tsx:57, 65-72`).
+
+#### Security & ownership
+- [x] Owner-only: page reuses the plan page's exact auth + ownership gate; RLS join means A can never open B's list (proven in `tests/PROJ-8-shopping-list-rls-isolation.spec.ts`).
+- [x] Unauthenticated → redirect to `/login?returnTo=…` (`page.tsx:33`; proven in `tests/PROJ-8-shopping-list-routes.spec.ts`).
+- [x] Non-owner direct navigation → scan/plan/lines all read empty under RLS → `notFound()` / redirect, no data shown (RLS test: non-owner reads return null/[]).
+
+### Edge Cases Status
+- [x] **Empty plan** → empty state with a link back to the plan (`page.tsx:89-101`).
+- [x] **Invalid/missing `image_url`** → `safeImageUrl` returns null → sprout fallback icon (`page.tsx:62`, `shopping-list.tsx:191-196`).
+- [x] **Web Share unsupported / clipboard blocked** → graceful 3-tier fallback (share → clipboard → selectable textarea).
+- [x] **Latin name with diacritics / `×` / subspecies** → URL-encoded (unit-tested).
+- [x] **Stale plan / soil-flagged / zone-unconfirmed** → links never blocked; warnings surfaced.
+- [x] **Duplicate plant lines** → merged upstream by `mergeDuplicateLines` before display; no plant shown twice.
+- [~] **Garden centre changes/loses its search-URL format** → link still opens the shop search; disclaimer sets expectations. (Relevant to BUG-1 / BUG-2 below.)
+
+### Security Audit Results
+- [x] Authentication: shopping-list URL requires login; unauth → `/login` (E2E verified).
+- [x] Authorization: owner-only via inherited RLS join through `scans`/`plans`/`plan_plants`; non-owner reads return nothing (two-account E2E verified). No new tables/policies introduced.
+- [x] Input validation / XSS: plant names render as escaped text (React); `image_url` passes the http(s)-only `safeImageUrl` guard (blocks `javascript:`/`data:`); deep-link hrefs are hardcoded `https://` templates with the Latin name `encodeURIComponent`-escaped into the query string — no injection or scheme-smuggling vector.
+- [x] External links: `target="_blank"` + `rel="noopener noreferrer"` on every outbound link (reverse-tabnabbing safe).
+- [x] No secrets exposed; no new API surface; no new persisted data.
+
+### Bugs Found
+
+#### BUG-1: The primary "Find at Plantura" deep link returns zero results for botanical searches — FIXED (2026-06-23)
+- **Status:** Fixed — primary garden centre swapped to **Pflanzmich** (`https://www.pflanzmich.de/search/?queryInput={q}`), Gaißmayer kept as the alternative, in `src/lib/garden-centres.ts`. Unit tests, typecheck, and lint green. **Remaining manual check before deploy:** open the live "Find at Pflanzmich" link once in a browser to confirm result relevance (the shop is SPA/bot-protected and can't be machine-verified here).
+- **Severity:** Medium
+- **Steps to Reproduce:**
+  1. Open a shopping list and tap "Find at Plantura" for any plant (verified with `Lavandula angustifolia`).
+  2. Expected: Plantura opens pre-searched with relevant lavender products.
+  3. Actual: Plantura's search executes (the `q` param is honoured) but returns **"Keine Suchergebnisse im Plantura Shop"** — zero results. Even the common German term `Lavendel` returns nothing. Plantura's shop does not appear to index plants by botanical name.
+- **Impact:** The AC ("opens in a new tab pre-searched") passes mechanically and the disclaimer covers availability — so this is not a code defect — but the **primary** garden centre is Maya's single trusted "one decision," and it reliably lands on an empty results page. This degrades the core value of the Order step.
+- **Priority:** Fix before deployment — re-evaluate the primary garden-centre choice (a botanical-name-searchable plant nursery) or the primary search term. This is a one-line config change in `src/lib/garden-centres.ts` (the documented swap-in point); no UI change needed.
+- **Investigation (2026-06-23, requested at QA review):** Plantura's failure is conclusive (explicit "Keine Suchergebnisse" for `Lavandula angustifolia` *and* `Lavendel`). Replacement candidates surveyed:
+  - **Pflanzmich.de** — large mail-order nursery; search pattern confirmed `https://www.pflanzmich.de/search/?queryInput={q}`; carries a dedicated Lavendel category. Strong **primary** candidate.
+  - **Staudengärtnerei Gaißmayer** (current alternative) — perennial specialist, botanical-name native, `searchword={q}` accepted; keep, or promote to primary.
+  - **Baumschule Horstmann** — large botanically-organised nursery, strong candidate, but bot-blocks automated requests so its exact search param wasn't captured.
+  - **Caveat:** these shops are SPA/bot-protected; automated fetch could confirm Plantura's *failure* and the candidates' *URL pattern + that they stock the plant*, but not machine-count result relevance. **Confirm the chosen template once in a real browser before shipping.** Suggested change: primary → Pflanzmich (`/search/?queryInput={q}`), keep Gaißmayer as alternative.
+
+#### BUG-2: Gaißmayer (alternative) search-URL filtering unconfirmed
+- **Severity:** Low
+- **Steps to Reproduce:**
+  1. Expand "other shops" and open the Gaißmayer link for a plant.
+  2. The `searchword=` parameter the dev guessed is **accepted** by the live site (good — better than documented), but the results page appears to return the full catalogue (~3278 products) rather than a clearly filtered lavender result; it's ambiguous whether the term actually narrows results.
+- **Impact:** Link opens the shop's search and is covered by the disclaimer + the "garden centre changes its search format" edge case. Worth confirming the exact query key/behaviour against the live site and fixing the one template if needed.
+- **Priority:** Fix in next sprint / nice to have.
+
+#### BUG-3 (regression watch, NOT PROJ-8): two PROJ-2 login E2E tests are flaky
+- **Severity:** Low (test infrastructure; pre-existing, in already-deployed PROJ-2 — **not a PROJ-8 regression**)
+- **Detail:** `tests/PROJ-2-auth-profile.spec.ts:31` and `:39` (and once `:18`) intermittently fail with `getByLabel('Email')`/validation-text timeouts. Non-deterministic (different tests fail per run; `:31` failed 1 of 3 repeats). Root cause: the Playwright `webServer` runs `npm run dev`, so the first hit on `/login` compiles via Turbopack and can exceed the default 5s assertion timeout; the login form markup is correct and untouched since PROJ-2. All PROJ-8 tests pass 4/4 across Chromium + Mobile Safari.
+- **Priority:** Fix in next sprint — raise the timeout / pre-warm routes / build before E2E. Tracked against PROJ-2, not blocking PROJ-8.
+
+### Automated Tests Added
+- **Unit (`src/lib/garden-centres.test.ts`, 13 tests):** config invariants (exactly one primary, alternatives exclude it, every template an http(s) URL with a `{q}` token) + Latin-name URL-encoding (space, `×`, diacritics, `&`/quote escaping, trim, single-token replace). All pass.
+- **E2E (`tests/PROJ-8-shopping-list-routes.spec.ts`):** unauthenticated visit → `/login?returnTo=…`. Passes on Chromium + Mobile Safari.
+- **E2E (`tests/PROJ-8-shopping-list-rls-isolation.spec.ts`, two real accounts):** owner reads their own scan/plan/flagged line (list has data) and the joined plant the deep link is built from; non-owner reads of the same scan, plan, and plan lines all return null/empty (no list data leaks). All pass.
+- **Regression:** full `npm test` (146 → 159 with the new file) green; full `npm run test:e2e` green except the flaky PROJ-2 login tests (BUG-3); `tsc --noEmit`, `eslint`, and `npm run build` all clean. New route `/scans/[id]/shopping-list` registered in the build.
+
+### Summary
+- **Acceptance Criteria:** 19/19 passed (BUG-1 is a product-quality concern within a passing AC, not an AC failure).
+- **Bugs Found:** 3 total (0 Critical, 0 High, 1 Medium, 2 Low). BUG-3 is pre-existing in PROJ-2, not a PROJ-8 regression.
+- **Security:** Pass — owner-only access, no new attack surface, XSS/scheme-smuggling and tabnabbing covered.
+- **Production Ready:** YES (no Critical/High bugs). BUG-1 (Medium) is strongly recommended before deploy — it's a one-line config change and directly affects the primary persona's key action.
+- **Recommendation:** Fix BUG-1 (swap the primary garden centre / search term) before deploy; BUG-2 and BUG-3 can follow.
 
 ## Deployment
 _To be added by /deploy_
