@@ -11,7 +11,10 @@
  * here and the shopping-list UI never changes.
  *
  * Resolved at /architecture (2026-06-23): Plantura is the primary, Gaißmayer the
- * alternative.
+ * alternative. Revised after PROJ-8 QA (2026-06-23): Plantura's shop returns zero
+ * results for botanical-name searches (even "Lavendel"), so the primary is now
+ * Pflanzmich — a large nursery whose catalogue is searchable by botanical name —
+ * with Gaißmayer kept as the alternative. See PROJ-8 "QA Test Results" → BUG-1.
  */
 
 export type GardenCentre = {
@@ -29,18 +32,21 @@ export type GardenCentre = {
 /**
  * v1 curated set. Order is display order within "other shops".
  *
- * - Plantura: verified — the shop search is Shopify-style (`/search?q=…&type=product`)
- *   on the `shop.` subdomain.
- * - Gaißmayer: the product search lives at `/web/shop/suche/produkte`. The exact
- *   query-string key is not publicly exposed; `searchword` is a best guess. If it's
- *   wrong the link still opens Gaißmayer's search page (graceful per the spec's
- *   "garden centre changes its search-URL format" edge case) — fix the one template
- *   here when confirmed.
+ * - Pflanzmich (primary): large mail-order nursery; product search at
+ *   `/search/?queryInput=…`, catalogue searchable by botanical name.
+ * - Gaißmayer: perennial specialist; product search at `/web/shop/suche/produkte`
+ *   with `searchword=…`. Botanical-name native.
+ *
+ * Both URL patterns were confirmed against the live sites; result relevance should
+ * be eyeballed in a real browser after any change (the shops are SPA/bot-protected,
+ * so it can't be machine-verified here). If a key changes, the link still opens the
+ * shop's search (graceful per the spec's "garden centre changes its search-URL
+ * format" edge case) — fix the one template here.
  */
 export const GARDEN_CENTRES: GardenCentre[] = [
   {
-    name: 'Plantura',
-    searchUrlTemplate: 'https://shop.plantura.garden/search?q={q}&type=product',
+    name: 'Pflanzmich',
+    searchUrlTemplate: 'https://www.pflanzmich.de/search/?queryInput={q}',
     primary: true,
   },
   {
