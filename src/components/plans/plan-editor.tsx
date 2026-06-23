@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Leaf, Minus, Plus, RotateCcw, Shovel, Sprout, TriangleAlert, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -18,6 +18,7 @@ import { computeQuantities } from '@/lib/plan-engine'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Command,
@@ -148,6 +149,17 @@ export function PlanEditor({
     saveDebounced(next)
   }
 
+  // Set an exact quantity typed into the input (pins the plant, like the stepper).
+  function setQty(id: string, qty: number) {
+    const next = rebalance(
+      lines.map((l) =>
+        l.plant.id === id ? { ...l, quantity: Math.max(1, Math.floor(qty)), pinned: true } : l,
+      ),
+    )
+    setLines(next)
+    saveDebounced(next)
+  }
+
   // Un-pin a hand-set quantity: the plant rejoins auto-rebalancing and returns to
   // an engine-computed quantity for the current set.
   function resetQty(id: string) {
@@ -251,6 +263,7 @@ export function PlanEditor({
                       line={line}
                       maintenancePref={plan.snapshot_maintenance}
                       onStep={(delta) => stepQty(line.plant.id, delta)}
+                      onSet={(qty) => setQty(line.plant.id, qty)}
                       onReset={() => resetQty(line.plant.id)}
                       onRemove={() => removePlant(line.plant.id)}
                     />
@@ -317,18 +330,34 @@ function EditablePlantCard({
   line,
   maintenancePref,
   onStep,
+  onSet,
   onReset,
   onRemove,
 }: {
   line: Line
   maintenancePref: Plan['snapshot_maintenance']
   onStep: (delta: number) => void
+  onSet: (qty: number) => void
   onReset: () => void
   onRemove: () => void
 }) {
   const { plant } = line
   const img = safeImageUrl(plant.image_url)
   const maintenanceMatch = maintenancePref != null && plant.maintenance_level === maintenancePref
+
+  // Local draft so the user can clear/type freely; commit on blur or Enter.
+  const [draft, setDraft] = useState(String(line.quantity))
+  useEffect(() => setDraft(String(line.quantity)), [line.quantity])
+
+  function commitDraft() {
+    const n = parseInt(draft, 10)
+    if (Number.isFinite(n) && n >= 1) {
+      if (n !== line.quantity) onSet(n)
+      else setDraft(String(line.quantity))
+    } else {
+      setDraft(String(line.quantity)) // invalid/empty → revert
+    }
+  }
 
   return (
     <Card>
@@ -383,9 +412,23 @@ function EditablePlantCard({
             >
               <Minus className="h-4 w-4" />
             </Button>
-            <span className="min-w-10 text-center text-sm font-semibold tabular-nums">
-              × {line.quantity}
-            </span>
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              step={1}
+              aria-label={`Quantity of ${plant.common_name}`}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commitDraft}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  e.currentTarget.blur()
+                }
+              }}
+              className="h-8 w-16 text-center text-sm font-semibold tabular-nums"
+            />
             <Button
               type="button"
               variant="outline"
