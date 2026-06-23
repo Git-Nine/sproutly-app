@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import { Leaf, Minus, Plus, RotateCcw, Shovel, Sprout, TriangleAlert, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -309,17 +310,25 @@ export function PlanEditor({
         </Popover>
       )}
 
-      {/* Order seam (PROJ-8 wires this) */}
+      {/* Order seam — PROJ-8 wires this to the shopping list */}
       <div className="space-y-2 pt-2">
-        <Button type="button" className="w-full" disabled aria-disabled>
-          <Sprout className="h-4 w-4" /> Order these plants
-        </Button>
+        {lines.length === 0 ? (
+          <Button type="button" className="w-full" disabled aria-disabled>
+            <Sprout className="h-4 w-4" /> Order these plants
+          </Button>
+        ) : (
+          <Button asChild className="w-full">
+            <Link href={`/scans/${scan.id}/shopping-list`}>
+              <Sprout className="h-4 w-4" /> Order these plants
+            </Link>
+          </Button>
+        )}
         <p className="text-center text-xs text-muted-foreground">
           {lines.length === 0
             ? 'Add at least one plant to order.'
             : saving
               ? 'Saving your changes…'
-              : 'Shopping list & ordering are coming soon.'}
+              : 'See your shopping list with a link to a garden centre for each plant.'}
         </p>
       </div>
     </div>

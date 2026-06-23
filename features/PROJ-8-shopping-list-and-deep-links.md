@@ -1,6 +1,6 @@
 # PROJ-8: Shopping List & Deep Links
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-06-23
 **Last Updated:** 2026-06-23
 
@@ -222,6 +222,22 @@ Because the list is always derived from the current plan, there is **no such thi
 - `@/components/ui/checkbox`, `@/components/ui/collapsible`, `@/components/ui/card`, `@/components/ui/badge`, `@/components/ui/button` — all installed.
 - Web Share API + Clipboard API are browser built-ins (no library).
 - Supabase client/server helpers, `mergeDuplicateLines`, `safeImageUrl`, layer helpers — all exist.
+
+## Frontend Implementation (/frontend)
+**Implemented 2026-06-23.** Build, typecheck, and lint all pass; route `/scans/[id]/shopping-list` registered.
+
+**New files:**
+- `src/lib/garden-centres.ts` — config constant (`GARDEN_CENTRES`: Plantura primary, Gaißmayer alternative) + `gardenCentreSearchUrl()` link builder (URL-encodes the Latin name into a `{q}` template). The documented v2 swap-in point.
+- `src/components/plans/shopping-list.tsx` — `'use client'` component. Renders the plan's plants grouped by layer (reusing `LAYER_DISPLAY_ORDER`/`plantTypePlural`), summary line, soil-mismatch badge, primary "Find at [centre]" deep link + "other shops" collapsible, session-only tick-off (`useState`), and Share (Web Share API → clipboard → selectable-textarea fallback). Disclaimer at the foot.
+- `src/app/scans/[id]/shopping-list/page.tsx` — server page reusing the plan page's auth + ownership pattern (login redirect, scan `notFound()`, no-plan → back to scan). Lighter fetch than the plan page (no catalogue/survivors/staleness/maintenance). Derives serializable `ShoppingLine[]` via `mergeDuplicateLines` + `safeImageUrl`. Empty-state when the plan has no plants.
+
+**Changed:**
+- `src/components/plans/plan-editor.tsx` — the disabled "Order these plants" seam now becomes an enabled `Link` to `/scans/[id]/shopping-list` when `lines.length > 0`.
+
+**Deviations / notes:**
+- **No `/backend` needed** — feature is read-only over existing `plans`/`plan_plants`/`plants`; no new tables, APIs, or RLS. Ownership is inherited from existing RLS via the same reads the plan page uses.
+- **Garden-centre search params:** Plantura verified against the live site (`shop.plantura.garden/search?q=…&type=product`). Gaißmayer's exact query key isn't publicly exposed; `searchword=` on `/web/shop/suche/produkte` is a best guess — if wrong the link still opens its search page (covered by the spec's "garden centre changes its search-URL format" edge case + disclaimer). Fix the one template in `garden-centres.ts` when confirmed.
+- The list renders inside the client component (rather than server-rendered lines) so tick-off state stays co-located; the page itself is still a server component doing the fetch/auth.
 
 ## QA Test Results
 _To be added by /qa_
