@@ -26,7 +26,7 @@
 
 ## Out of Scope
 <!-- What this feature explicitly does NOT cover. Critical for developer handoffs. -->
-- **The shopping list, nursery deep links, prices, quantities-to-buy, purchase** — **PROJ-8**. PROJ-7 renders the **"Order these plants"** CTA as a disabled seam (marked as the next step); PROJ-8 wires its destination. PROJ-7 builds no ordering/shopping/checkout UI.
+- **The shopping list, garden centre deep links, prices, quantities-to-buy, purchase** — **PROJ-8**. PROJ-7 renders the **"Order these plants"** CTA as a disabled seam (marked as the next step); PROJ-8 wires its destination. PROJ-7 builds no ordering/shopping/checkout UI.
 - **The matching/generation algorithm itself** — **PROJ-6**. PROJ-7 *reuses* the engine (for quantity re-adaptation and Regenerate); it does not change the hard filters, layering, or ranking.
 - **Adding plants that don't suit the site** — only the engine's **matching survivors** (passed sun/zone/fit) can be added. No whole-catalogue add (would reintroduce unviable plants the engine deliberately excludes).
 - **An explicit Accept/Reject state or approval workflow** — dropped for minimal friction; proceeding to Order is the implicit acceptance. There is no "accepted" status on a plan.

@@ -50,7 +50,7 @@ Photo upload → Space scan → Plan generation → Plan review → Shopping lis
 | Scan | User photographs their space. EXIF extracts GPS + timestamp. Short form captures surface type, size, sun exposure. |
 | Plan | Rule-based engine generates a single opinionated planting plan from the curated native plant database. |
 | Review | User sees the plan with plain-language reasoning per plant. Can accept or remove individual plants. |
-| Order | App generates a shopping list. Deep links to German online nurseries for convenience. |
+| Order | App generates a shopping list. Deep links to German online garden centres for convenience. |
 | Grow | User logs progress photos over time. Chronological timeline builds emotional attachment and retention. |
 
 ---
@@ -102,8 +102,8 @@ Photo upload → Space scan → Plan generation → Plan review → Shopping lis
 | Feature | Reason deferred |
 |---|---|
 | AI / ML inference (vision, LLM) | Validate journey first; clean swap-in points designed now |
-| Nursery API integration | Requires partner agreements; deep links cover v1 |
-| Survival Confidence Score | Needs nursery + soil data combined — v2 |
+| Garden centre API integration | Requires partner agreements; deep links cover v1 |
+| Survival Confidence Score | Needs garden centre + soil data combined — v2 |
 | Push notifications / seasonal nudges | Grow phase depth — v2 |
 | Social / community features | Requires user base to be useful — v2 |
 | Food growing / vegetable planning | Out of product scope |
@@ -181,13 +181,13 @@ The v1 architecture deliberately separates concerns so AI can be introduced with
 |---|---|---|
 | Scan | EXIF + manual form | Vision model reads photo, populates same fields |
 | Plan generation | Rule engine queries plant DB | LLM augments or replaces rule engine, same output shape |
-| Ordering | Deep links + shopping list | Real nursery API integration, Survival Confidence Score |
+| Ordering | Deep links + shopping list | Real garden centre API integration, Survival Confidence Score |
 
 ---
 
 ## 12. Geography
 
-**Germany-first.** All native species, soil data, hardiness zones, weather data, and nursery deep links scoped to Germany for v1. Expanding to broader Europe is a later milestone once the core model is validated.
+**Germany-first.** All native species, soil data, hardiness zones, weather data, and garden centre deep links scoped to Germany for v1. Expanding to broader Europe is a later milestone once the core model is validated.
 
 ---
 

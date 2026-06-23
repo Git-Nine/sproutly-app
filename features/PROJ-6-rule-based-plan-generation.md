@@ -26,7 +26,7 @@
 - **Interactive editing of the plan** — the "see more species → select → quantities re-adapt", swap, add, remove flows are **PROJ-7**. PROJ-6 displays the generated plan **read-only** (plus a read-only "N more plants also suit your space" preview). The adaptive-quantity *logic* is built here so PROJ-7 reuses it.
 - **Accepting / rejecting a plan and any "accepted" state** — **PROJ-7**. PROJ-6 only generates, persists, and shows a plan.
 - **The in-app "your plan was updated" notification surface** — **PROJ-7** (per PROJ-5's open question, the notification surface is owned there). PROJ-6 implements only the *data* reassignment that keeps `plan_plants` consistent on a plant delete; it does not build any notification UI.
-- **Shopping list, nursery deep links, prices, purchase** — **PROJ-8**. PROJ-6 produces the quantities PROJ-8 consumes; it shows no commerce.
+- **Shopping list, garden centre deep links, prices, purchase** — **PROJ-8**. PROJ-6 produces the quantities PROJ-8 consumes; it shows no commerce.
 - **AI / LLM plan generation** — v1 is a deterministic rule engine. The output shape is designed so an LLM can augment or replace the engine later (PRD "Plan generation" swap-in point) without changing the schema or the display.
 - **A spatial / positional planting layout** (where each plant physically goes) — v1 produces a curated set with quantities, not a placement map. Deferred.
 - **Matching on climate beyond hardiness zone** (rainfall, frost days, annual-min temperature as independent filters) — these are displayed as context only; no plant attribute matches them (PROJ-5 deliberately carries no moisture/rainfall attribute). Zone (derived from annual-min temp) is the one climate signal used.

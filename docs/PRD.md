@@ -49,7 +49,7 @@ See `features/INDEX.md` for dependencies and build order.
 - **Platform:** Mobile-first PWA. Primary viewport 390px (iPhone 14).
 - **Backend:** Supabase (Postgres + Auth + Storage). Row Level Security on all user-data tables (`user_id = auth.uid()`). Photos in private, user-namespaced Storage buckets (`/{user_id}/filename`). `plan_plants` RLS joins through `plans` to verify ownership. `plants` table: all authenticated users read, only admins write.
 - **Admin access:** Role-based — a `role` column on `users`; admin routes gated by `role = 'admin'`.
-- **Geography:** Germany-first. Native species, soil (BGR), hardiness zones, weather (DWD), and nursery deep links scoped to Germany for v1.
+- **Geography:** Germany-first. Native species, soil (BGR), hardiness zones, weather (DWD), and garden centre deep links scoped to Germany for v1.
 - **External APIs (all free / open data):** BGR (soil), DWD (weather), hardiness zones, FloraWeb/BfN (plant database seeding).
 - **Hosting:** Vercel (resolved at `/deploy`, 2026-06-18) — GitHub repo auto-deploys on push to `main`; env vars set in the Vercel dashboard.
 - **Design system:** see `docs/design-system.md` — calm reassuring greens + warm neutrals, serif headings + Montserrat body, soft rounded white cards on a cream canvas. Built on Tailwind + shadcn/ui. Visual reference mockups in `docs/design-references/`.
@@ -57,8 +57,8 @@ See `features/INDEX.md` for dependencies and build order.
 ## Non-Goals (v1)
 Deferred to keep v1 focused on validating the core journey:
 - AI / ML inference (vision, LLM) — clean swap-in points designed now, built later.
-- Nursery API integration — deep links cover v1.
-- Survival Confidence Score — needs nursery + soil data combined (v2).
+- Garden centre API integration — deep links cover v1.
+- Survival Confidence Score — needs garden centre + soil data combined (v2).
 - Push notifications / seasonal nudges (v2).
 - Social / community features (v2).
 - Food growing / vegetable planning — out of product scope.
@@ -70,7 +70,7 @@ Deferred to keep v1 focused on validating the core journey:
 The v1 architecture separates concerns so AI can be introduced without restructuring the database or frontend:
 - **Scan:** EXIF + manual form → vision model populates the same fields.
 - **Plan generation:** rule engine queries plant DB → LLM augments or replaces it, same output shape.
-- **Ordering:** deep links + shopping list → real nursery API integration + Survival Confidence Score.
+- **Ordering:** deep links + shopping list → real garden centre API integration + Survival Confidence Score.
 
 ---
 
