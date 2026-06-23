@@ -240,6 +240,7 @@ All from already-installed shadcn components (`card`, `badge`, `button`, `comman
 
 ### Post-deploy tweaks
 - **2026-06-23 — Reset button on pinned quantities.** When a quantity is hand-set the plant is pinned ("set by you"); a **Reset** control (↺) now appears next to it. Reset un-pins the line so it rejoins auto-rebalancing and returns to an engine-computed quantity for the current set. Added `resetQty` in `PlanEditor` (un-pin → `rebalance` → immediate save) and an `onReset` button in `EditablePlantCard`. `tsc` ✓, `lint` ✓.
+- **2026-06-23 — Editable quantity input.** The quantity is now a typeable `Input` (shadcn) between the −/+ buttons, so large amounts don't need repeated clicks. Typing a value pins the plant (same as the stepper); committed on blur/Enter, min 1, invalid/empty reverts to the current value. Added `setQty` in `PlanEditor` and a local draft + `onSet` in `EditablePlantCard`. `tsc` ✓, `lint` ✓.
 
 ### Deviations / decisions during build
 - **Auto-save = replace the plan's lines** (delete-all + insert current) on each change rather than per-row diffs — simplest and correct for a ≤dozen-row plan; it also writes back the merged/rebalanced set, so duplicate lines self-heal. Stepper debounced; add/remove immediate. Last-write-wins (project convention).
