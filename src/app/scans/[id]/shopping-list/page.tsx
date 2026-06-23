@@ -32,15 +32,15 @@ export default async function ShoppingListPage({ params }: { params: Promise<{ i
 
   if (!user) redirect(`/login?returnTo=/scans/${id}/shopping-list`)
 
-  // RLS guarantees a user only reads their own scan.
-  const { data: scan } = await supabase.from('scans').select('*').eq('id', id).maybeSingle<Scan>()
+  // RLS guarantees a user only reads their own scan. `id` is the URL short_code.
+  const { data: scan } = await supabase.from('scans').select('*').eq('short_code', id).maybeSingle<Scan>()
   if (!scan) notFound()
 
   // No plan yet → send the user back to the scan to generate one.
   const { data: plan } = await supabase
     .from(PLANS_TABLE)
     .select('*')
-    .eq('scan_id', id)
+    .eq('scan_id', scan.id)
     .maybeSingle<Plan>()
   if (!plan) redirect(`/scans/${id}`)
 

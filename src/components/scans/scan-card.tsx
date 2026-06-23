@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 /** A single space in the "My Spaces" list. Server-rendered; `photoUrl` is pre-signed. */
 export function ScanCard({ scan, photoUrl }: { scan: Scan; photoUrl: string | null }) {
   return (
-    <Link href={`/scans/${scan.id}`} className="block">
+    <Link href={`/scans/${scan.short_code}`} className="block">
       <Card className="flex items-center gap-4 overflow-hidden p-3 transition-colors hover:border-accent">
         <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-secondary">
           {photoUrl ? (

@@ -141,6 +141,8 @@ export function ScanForm({
         photo_path: photoPath,
       }
 
+      // The short_code (set DB-side on insert) is what the URL uses, not the uuid.
+      let targetCode = scan?.short_code ?? ''
       if (isEdit) {
         // Refresh GPS/date only when a new photo was provided.
         const geo = file ? { lat: exif?.lat ?? null, lng: exif?.lng ?? null, taken_at: exif?.takenAt ?? null } : {}
@@ -150,15 +152,20 @@ export function ScanForm({
           .eq('id', scanId)
         if (updateError) throw updateError
       } else {
-        const { error: insertError } = await supabase.from('scans').insert({
-          id: scanId,
-          user_id: userId,
-          ...fields,
-          lat: exif?.lat ?? null,
-          lng: exif?.lng ?? null,
-          taken_at: exif?.takenAt ?? null,
-        })
+        const { data: inserted, error: insertError } = await supabase
+          .from('scans')
+          .insert({
+            id: scanId,
+            user_id: userId,
+            ...fields,
+            lat: exif?.lat ?? null,
+            lng: exif?.lng ?? null,
+            taken_at: exif?.takenAt ?? null,
+          })
+          .select('short_code')
+          .single<{ short_code: string }>()
         if (insertError) throw insertError
+        targetCode = inserted.short_code
       }
 
       toast.success('Space saved.')
@@ -175,7 +182,7 @@ export function ScanForm({
         })
       }
 
-      router.push(`/scans/${scanId}`)
+      router.push(`/scans/${targetCode}`)
       router.refresh()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not save your scan. Please try again.')

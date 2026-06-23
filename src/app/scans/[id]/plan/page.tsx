@@ -25,21 +25,21 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
 
   if (!user) redirect(`/login?returnTo=/scans/${id}/plan`)
 
-  // RLS guarantees a user only reads their own scan.
-  const { data: scan } = await supabase.from('scans').select('*').eq('id', id).maybeSingle<Scan>()
+  // RLS guarantees a user only reads their own scan. `id` is the URL short_code.
+  const { data: scan } = await supabase.from('scans').select('*').eq('short_code', id).maybeSingle<Scan>()
   if (!scan) notFound()
 
   // No plan yet (or tables not migrated) → send the user to the scan to generate one.
   const { data: plan } = await supabase
     .from(PLANS_TABLE)
     .select('*')
-    .eq('scan_id', id)
+    .eq('scan_id', scan.id)
     .maybeSingle<Plan>()
   if (!plan) redirect(`/scans/${id}`)
 
   const [linesResult, enrichmentResult, profileResult, catalogueResult] = await Promise.all([
     supabase.from(PLAN_PLANTS_TABLE).select('*, plants(*)').eq('plan_id', plan.id).order('sort_order'),
-    supabase.from('scan_enrichment').select('*').eq('scan_id', id).maybeSingle<ScanEnrichment>(),
+    supabase.from('scan_enrichment').select('*').eq('scan_id', scan.id).maybeSingle<ScanEnrichment>(),
     supabase
       .from('users')
       .select('maintenance_preference')

@@ -28,8 +28,9 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
 
   if (!user) redirect(`/login?returnTo=/scans/${id}`)
 
-  // RLS guarantees a user can only read their own scan.
-  const { data: scan } = await supabase.from('scans').select('*').eq('id', id).maybeSingle<Scan>()
+  // RLS guarantees a user can only read their own scan. `id` is the URL short_code;
+  // scan.id (uuid) is used for every downstream reference.
+  const { data: scan } = await supabase.from('scans').select('*').eq('short_code', id).maybeSingle<Scan>()
   if (!scan) notFound()
 
   const [photoResult, enrichmentResult, planResult] = await Promise.all([
@@ -39,10 +40,10 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
     supabase
       .from('scan_enrichment')
       .select('*')
-      .eq('scan_id', id)
+      .eq('scan_id', scan.id)
       .maybeSingle<ScanEnrichment>(),
     // Tolerates the plans table not existing yet → treated as "no plan".
-    supabase.from(PLANS_TABLE).select('id').eq('scan_id', id).maybeSingle<{ id: string }>(),
+    supabase.from(PLANS_TABLE).select('id').eq('scan_id', scan.id).maybeSingle<{ id: string }>(),
   ])
 
   const photoUrl = photoResult.data?.signedUrl ?? null
@@ -95,7 +96,7 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
         <div className="mt-6 space-y-2">
           {hasPlan ? (
             <Button asChild className="w-full">
-              <Link href={`/scans/${scan.id}/plan`}>
+              <Link href={`/scans/${scan.short_code}/plan`}>
                 <Sparkles className="h-4 w-4" /> View planting plan
               </Link>
             </Button>
@@ -111,7 +112,7 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
 
         <div className="mt-6 space-y-2">
           <Button asChild variant="secondary" className="w-full">
-            <Link href={`/scans/${scan.id}/edit`}><Pencil className="h-4 w-4" /> Edit details</Link>
+            <Link href={`/scans/${scan.short_code}/edit`}><Pencil className="h-4 w-4" /> Edit details</Link>
           </Button>
           <DeleteScanButton scanId={scan.id} photoPath={scan.photo_path} />
         </div>

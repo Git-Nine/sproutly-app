@@ -107,7 +107,7 @@ export function GeneratePlanButton({
         if (linesErr) throw linesErr
       }
 
-      router.push(`/scans/${scan.id}/plan`)
+      router.push(`/scans/${scan.short_code}/plan`)
       router.refresh()
     } catch (err) {
       toast.error(

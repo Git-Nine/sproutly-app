@@ -15,7 +15,8 @@ export default async function EditScanPage({ params }: { params: Promise<{ id: s
 
   if (!user) redirect(`/login?returnTo=/scans/${id}/edit`)
 
-  const { data: scan } = await supabase.from('scans').select('*').eq('id', id).maybeSingle<Scan>()
+  // `id` is the URL short_code; RLS keeps this owner-only.
+  const { data: scan } = await supabase.from('scans').select('*').eq('short_code', id).maybeSingle<Scan>()
   if (!scan) notFound()
 
   let photoUrl: string | null = null

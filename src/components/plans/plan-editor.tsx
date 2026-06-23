@@ -318,7 +318,7 @@ export function PlanEditor({
           </Button>
         ) : (
           <Button asChild className="w-full">
-            <Link href={`/scans/${scan.id}/shopping-list`}>
+            <Link href={`/scans/${scan.short_code}/shopping-list`}>
               <Sprout className="h-4 w-4" /> Order these plants
             </Link>
           </Button>

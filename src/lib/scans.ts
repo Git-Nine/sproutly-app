@@ -57,6 +57,8 @@ export function scanPhotoPath(userId: string, scanId: string): string {
 /** A row of public.scans as the UI reads it. */
 export type Scan = {
   id: string
+  /** Short, URL-facing code (PROJ-3). The id stays the PK for all internal references. */
+  short_code: string
   user_id: string
   name: string | null
   photo_path: string | null
