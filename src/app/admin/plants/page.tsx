@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft, Plus } from 'lucide-react'
 import { requireAdmin } from '@/lib/admin'
 import { Logo } from '@/components/brand/logo'
+import { ProfileLink } from '@/components/brand/profile-link'
 import { Button } from '@/components/ui/button'
 import { PlantsManager } from '@/components/admin/plants-manager'
 import { PLANTS_TABLE, type Plant } from '@/lib/plants'
@@ -23,7 +24,7 @@ export default async function AdminPlantsPage() {
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
         <Logo />
-        <span className="w-12" aria-hidden />
+        <ProfileLink />
       </header>
 
       <main className="mx-auto w-full max-w-4xl px-4 pb-16 pt-2">

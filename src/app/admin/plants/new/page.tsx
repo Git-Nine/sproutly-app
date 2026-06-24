@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { requireAdmin } from '@/lib/admin'
 import { Logo } from '@/components/brand/logo'
+import { ProfileLink } from '@/components/brand/profile-link'
 import { PlantForm } from '@/components/admin/plant-form'
 
 export default async function NewPlantPage() {
@@ -14,7 +15,7 @@ export default async function NewPlantPage() {
           <ArrowLeft className="h-4 w-4" /> Cancel
         </Link>
         <Logo />
-        <span className="w-12" aria-hidden />
+        <ProfileLink />
       </header>
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">

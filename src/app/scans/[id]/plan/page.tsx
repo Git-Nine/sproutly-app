@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
+import { ProfileLink } from '@/components/brand/profile-link'
 import { PlanEditor } from '@/components/plans/plan-editor'
 import { scanTitle, type Scan, type ScanEnrichment } from '@/lib/scans'
 import { PLANTS_TABLE, type Plant, type MaintenanceLevel } from '@/lib/plants'
@@ -67,7 +68,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
           <ArrowLeft className="h-4 w-4" /> Space
         </Link>
         <Logo />
-        <span className="w-12" aria-hidden />
+        <ProfileLink />
       </header>
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">

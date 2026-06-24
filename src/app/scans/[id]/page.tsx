@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ArrowLeft, ImageOff, Pencil, Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
+import { ProfileLink } from '@/components/brand/profile-link'
 import { DeleteScanButton } from '@/components/scans/delete-scan-button'
 import { ConditionsSummary } from '@/components/scans/conditions-summary'
 import { GeneratePlanButton } from '@/components/plans/generate-plan-button'
@@ -65,7 +66,7 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
           <ArrowLeft className="h-4 w-4" /> Spaces
         </Link>
         <Logo />
-        <span className="w-12" aria-hidden />
+        <ProfileLink />
       </header>
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">

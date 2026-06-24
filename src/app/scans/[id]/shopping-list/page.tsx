@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ArrowLeft, Leaf } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
+import { ProfileLink } from '@/components/brand/profile-link'
 import { Button } from '@/components/ui/button'
 import { ShoppingList, type ShoppingLine } from '@/components/plans/shopping-list'
 import { scanTitle, type Scan } from '@/lib/scans'
@@ -75,7 +76,7 @@ export default async function ShoppingListPage({ params }: { params: Promise<{ i
           <ArrowLeft className="h-4 w-4" /> Plan
         </Link>
         <Logo />
-        <span className="w-12" aria-hidden />
+        <ProfileLink />
       </header>
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">

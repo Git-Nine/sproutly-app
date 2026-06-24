@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { requireAdmin } from '@/lib/admin'
 import { Logo } from '@/components/brand/logo'
+import { ProfileLink } from '@/components/brand/profile-link'
 import { PlantForm } from '@/components/admin/plant-form'
 import { PLANTS_TABLE, type Plant } from '@/lib/plants'
 
@@ -24,7 +25,7 @@ export default async function EditPlantPage({ params }: { params: Promise<{ id: 
           <ArrowLeft className="h-4 w-4" /> Cancel
         </Link>
         <Logo />
-        <span className="w-12" aria-hidden />
+        <ProfileLink />
       </header>
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">
