@@ -345,3 +345,13 @@ The post-login landing was a static welcome screen at `/` ("Your garden. Less wo
 - **Returning user with ≥1 scan → `/scans`** ("My Spaces": new-scan button + their list) — their start screen.
 
 `/` still guards `if (!user) redirect('/login')` first (the PROJ-2 auth-redirect E2E still holds). The scans lookup tolerates the table not existing (treated as "no scans"). The profile (and admin "Plants") nav that lived in the old home header moved onto the `/scans` header, which is now the start screen; `/scans`' obsolete "Back to `/`" link was removed. `tsc` + `npm run lint` clean.
+
+## Post-Deploy Fix — short-code trigger permission (2026-06-24)
+
+**Symptom:** every authenticated "Save space" failed — `permission denied for function gen_scan_short_code` (without a photo; with a photo it surfaced as the generic "Could not save your scan" before the error message was improved).
+
+**Root cause:** the `before insert` trigger fn `set_scan_short_code()` (from the short-code enhancement) was a plain SECURITY INVOKER function that calls the helper `gen_scan_short_code()`. The trigger itself fires regardless of grants, but the *nested* helper call runs with the **invoking user's** rights — and EXECUTE on `gen_scan_short_code()` is revoked from `authenticated` (to keep it off the REST RPC surface). So the inner call was denied on every authenticated INSERT. It slipped through because the migration's backfill ran as the owner and "verified live" only ever *read* existing (already-backfilled) rows — no authenticated user had created a fresh scan. (PROJ-3 QA had flagged exactly this gap: the authenticated scan-create happy path was never browser-exercised.)
+
+- **DB fix:** migration `20260624110000_proj3_fix_short_code_trigger_execute.sql` — redefine `set_scan_short_code()` as **SECURITY DEFINER** so its nested helper call runs as the owner (which keeps EXECUTE). `gen_scan_short_code()` stays revoked from anon/authenticated. Safe: `search_path=''` pinned, all refs schema-qualified, no dynamic SQL or user input. **Applied to production via dashboard SQL Editor (2026-06-24).**
+- **App:** `scan-form.tsx` save `catch` now logs the full Supabase error (`[scan save] failed:`) and surfaces its real `.message` in the toast instead of the generic fallback — Supabase errors are plain objects (not `Error`), so the cause was previously swallowed. This is what exposed the bug.
+- **Lesson:** "triggers ignore EXECUTE grants" only covers the trigger function itself, not functions it calls. Any trigger fn that calls a revoked helper must be SECURITY DEFINER (or inline the call).

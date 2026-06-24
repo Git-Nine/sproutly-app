@@ -201,7 +201,16 @@ export function ScanForm({
       router.push(`/scans/${targetCode}`)
       router.refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not save your scan. Please try again.')
+      // Supabase errors are plain objects (PostgrestError/StorageError), not Error
+      // instances — pull out their message/code so the real cause is visible.
+      console.error('[scan save] failed:', err)
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+            ? String((err as { message: unknown }).message)
+            : 'Could not save your scan. Please try again.'
+      toast.error(message)
       setSaving(false)
     }
   }
