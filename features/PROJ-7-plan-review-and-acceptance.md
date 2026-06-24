@@ -341,3 +341,11 @@ No changes — reuses the existing Supabase keys.
 ### Carried forward
 - **PROJ-10 (In-App Notifications, P1)** — the reassignment "your plan was updated" notice (banner + My Spaces dot) was split out of PROJ-7; its spec is Planned.
 - **INFO-1** (replace-save non-atomicity) — acceptable for v1; a transactional RPC could harden it later.
+
+## Post-Deploy Enhancement — Per-plant care notes on the plan (2026-06-24)
+
+Each plant on the plan now shows a short info blurb under its name/badges — surfacing the existing `plants.care_notes` (e.g. *"Shear back after the first flush for a second bloom. Loves dry, sunny spots."*). This was always the intended home for the field: the admin form labels it *"Short care guidance shown later in plan review."*
+
+- **No DB / seed / type change** — `care_notes` already exists (PROJ-5 schema + admin form), is seeded with concise notes for all 40 catalogue plants (`scripts/seed-plants.mjs`), is in the `Plant` type, and was already fetched by the plan query (`plan_plants` → `plants(*)`). It simply wasn't rendered.
+- **App:** `plan-editor.tsx` `EditablePlantCard` shows a "Care tips" toggle (shadcn `Collapsible` + chevron) between the badges and the quantity stepper; the `plant.care_notes` text is **collapsed by default** and expands on click — keeps cards compact. Plants without notes render nothing (graceful).
+- **Verification:** `tsc --noEmit` + `npm run lint` clean. Depends on the production catalogue having `care_notes` populated (the seed includes them); the conditional render degrades to nothing for any null row.

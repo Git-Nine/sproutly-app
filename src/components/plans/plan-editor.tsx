@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { Leaf, Minus, Plus, RotateCcw, Shovel, Sprout, TriangleAlert, X } from 'lucide-react'
+import { ChevronDown, Leaf, Minus, Plus, RotateCcw, Shovel, Sprout, TriangleAlert, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
   LAYER_DISPLAY_ORDER,
@@ -19,6 +19,7 @@ import { computeQuantities } from '@/lib/plan-engine'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -407,6 +408,18 @@ function EditablePlantCard({
               </Badge>
             )}
           </div>
+
+          {plant.care_notes && (
+            <Collapsible>
+              <CollapsibleTrigger className="group inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline">
+                Care tips
+                <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-1 text-xs leading-relaxed text-muted-foreground">
+                {plant.care_notes}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
 
           {/* Quantity stepper */}
           <div className="flex items-center gap-2 pt-1">
