@@ -6,6 +6,7 @@ import { Logo } from '@/components/brand/logo'
 import { ScanCard } from '@/components/scans/scan-card'
 import { Button } from '@/components/ui/button'
 import { STORAGE_BUCKET, type Scan } from '@/lib/scans'
+import { PLANS_TABLE } from '@/lib/plans'
 
 export default async function ScansPage() {
   const supabase = await createClient()
@@ -38,6 +39,15 @@ export default async function ScansPage() {
     signed?.forEach((s) => {
       if (s.path && s.signedUrl) urlByPath.set(s.path, s.signedUrl)
     })
+  }
+
+  // Which scans already have a plan → their card jumps straight to the plan,
+  // skipping the conditions/detail step. Tolerates the plans table not existing.
+  const scanIds = scans.map((s) => s.id)
+  const plannedScanIds = new Set<string>()
+  if (scanIds.length > 0) {
+    const { data: plans } = await supabase.from(PLANS_TABLE).select('scan_id').in('scan_id', scanIds)
+    plans?.forEach((p) => plannedScanIds.add((p as { scan_id: string }).scan_id))
   }
 
   return (
@@ -86,7 +96,12 @@ export default async function ScansPage() {
         ) : (
           <div className="space-y-3">
             {scans.map((scan) => (
-              <ScanCard key={scan.id} scan={scan} photoUrl={scan.photo_path ? urlByPath.get(scan.photo_path) ?? null : null} />
+              <ScanCard
+                key={scan.id}
+                scan={scan}
+                photoUrl={scan.photo_path ? urlByPath.get(scan.photo_path) ?? null : null}
+                hasPlan={plannedScanIds.has(scan.id)}
+              />
             ))}
           </div>
         )}

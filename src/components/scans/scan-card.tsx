@@ -4,9 +4,19 @@ import { scanTitle, scanSummary, type Scan } from '@/lib/scans'
 import { Card } from '@/components/ui/card'
 
 /** A single space in the "My Spaces" list. Server-rendered; `photoUrl` is pre-signed. */
-export function ScanCard({ scan, photoUrl }: { scan: Scan; photoUrl: string | null }) {
+export function ScanCard({
+  scan,
+  photoUrl,
+  hasPlan = false,
+}: {
+  scan: Scan
+  photoUrl: string | null
+  /** When this scan already has a plan, the card opens the plan, not the conditions step. */
+  hasPlan?: boolean
+}) {
+  const href = hasPlan ? `/scans/${scan.short_code}/plan` : `/scans/${scan.short_code}`
   return (
-    <Link href={`/scans/${scan.short_code}`} className="block">
+    <Link href={href} className="block">
       <Card className="flex items-center gap-4 overflow-hidden p-3 transition-colors hover:border-accent">
         <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-secondary">
           {photoUrl ? (
