@@ -336,3 +336,12 @@ The photo was mandatory at three layers (DB `NOT NULL`, form validation, the "sa
   - `scans/[id]/page.tsx` — the no-photo detail view now shows a neutral `ImageOff` "No photo added" placeholder instead of a blank box. The "My Spaces" list (`scan-card.tsx`) and its batch thumbnail signing already tolerated null paths (icon placeholder) — no change needed.
 - **Security:** unchanged — pages stay auth-gated, RLS stays owner-only; the migration touches no policy. Client-side photo type/size validation still applies when a photo *is* provided.
 - **Status:** code complete, `tsc` + `npm run lint` clean, `scans.test.ts` 13/13 green. **Migration not yet applied to production** — apply `20260624100000_proj3_photo_optional.sql` (Supabase dashboard SQL Editor) before/with the next deploy. Until applied, saving without a photo will fail the DB `NOT NULL` constraint at runtime.
+
+## Post-Deploy Enhancement — Skip the welcome screen on login (2026-06-24)
+
+The post-login landing was a static welcome screen at `/` ("Your garden. Less work. More life." + "Scan a space" / "Set up your profile" CTAs), an extra step before the user could do anything. Removed it: `/` is now a **smart redirect** (it's the default `returnTo`, so one place covers every login path):
+
+- **First-time / no saved scans → `/scans/new`** (the scan form) — the user starts scanning immediately.
+- **Returning user with ≥1 scan → `/scans`** ("My Spaces": new-scan button + their list) — their start screen.
+
+`/` still guards `if (!user) redirect('/login')` first (the PROJ-2 auth-redirect E2E still holds). The scans lookup tolerates the table not existing (treated as "no scans"). The profile (and admin "Plants") nav that lived in the old home header moved onto the `/scans` header, which is now the start screen; `/scans`' obsolete "Back to `/`" link was removed. `tsc` + `npm run lint` clean.
