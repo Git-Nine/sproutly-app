@@ -72,7 +72,7 @@ export function LoginForm({
   return (
     <Card className="w-full max-w-sm border-border/70 shadow-sm">
       <CardHeader className="space-y-3 text-center">
-        <Logo className="mx-auto" />
+        <Logo className="mx-auto" href={null} />
         {!sentTo ? (
           <>
             <CardTitle className="text-2xl">Welcome</CardTitle>
