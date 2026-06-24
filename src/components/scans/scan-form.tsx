@@ -48,6 +48,7 @@ export function ScanForm({
 
   const [file, setFile] = useState<File | null>(null)
   const [exif, setExif] = useState<PhotoExif | null>(null)
+  const [removePhoto, setRemovePhoto] = useState(false)
   const [name, setName] = useState(scan?.name ?? '')
   const [postcode, setPostcode] = useState(scan?.postcode ?? '')
   const [postcodeTouched, setPostcodeTouched] = useState(Boolean(scan?.postcode))
@@ -64,6 +65,7 @@ export function ScanForm({
   async function handlePhoto(picked: File | null, pickedExif: PhotoExif | null) {
     setFile(picked)
     setExif(pickedExif)
+    setRemovePhoto(false) // picking a photo overrides a pending removal
     setErrors((e) => ({ ...e, photo: undefined }))
 
     // Auto-fill postcode from the photo's GPS — only if the user hasn't typed one.
@@ -87,6 +89,13 @@ export function ScanForm({
     }
   }
 
+  function handleRemovePhoto() {
+    setFile(null)
+    setExif(null)
+    setRemovePhoto(true)
+    setErrors((e) => ({ ...e, photo: undefined }))
+  }
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
 
@@ -106,9 +115,7 @@ export function ScanForm({
         if (msgs?.[0]) nextErrors[key as keyof Errors] = msgs[0]
       }
     }
-    if (!isEdit && !file) {
-      nextErrors.photo = 'Add a photo of your space'
-    }
+    // The photo is optional — a scan can be created from the conditions answers alone.
     if (Object.keys(nextErrors).length > 0 || !parsed.success) {
       setErrors(nextErrors)
       toast.error('Please fix the highlighted fields.')
@@ -129,6 +136,10 @@ export function ScanForm({
           .upload(path, optimized, { upsert: true, contentType: optimized.type })
         if (uploadError) throw uploadError
         photoPath = path
+      } else if (removePhoto && scan?.photo_path) {
+        // Delete the stored object; the row's photo_path (and photo-derived GPS) clears below.
+        await supabase.storage.from(STORAGE_BUCKET).remove([scan.photo_path])
+        photoPath = null
       }
 
       const fields = {
@@ -144,8 +155,13 @@ export function ScanForm({
       // The short_code (set DB-side on insert) is what the URL uses, not the uuid.
       let targetCode = scan?.short_code ?? ''
       if (isEdit) {
-        // Refresh GPS/date only when a new photo was provided.
-        const geo = file ? { lat: exif?.lat ?? null, lng: exif?.lng ?? null, taken_at: exif?.takenAt ?? null } : {}
+        // Refresh GPS/date with a new photo's EXIF; clear it when the photo is removed
+        // (the coordinates were photo-derived); otherwise leave it untouched.
+        const geo = file
+          ? { lat: exif?.lat ?? null, lng: exif?.lng ?? null, taken_at: exif?.takenAt ?? null }
+          : removePhoto
+            ? { lat: null, lng: null, taken_at: null }
+            : {}
         const { error: updateError } = await supabase
           .from('scans')
           .update({ ...fields, ...geo })
@@ -193,8 +209,13 @@ export function ScanForm({
   return (
     <form onSubmit={handleSave} className="space-y-6">
       <div className="space-y-2">
-        <Label>Photo</Label>
-        <PhotoPicker initialUrl={photoUrl} onSelect={handlePhoto} />
+        <Label>
+          Photo <span className="font-normal text-muted-foreground">(optional)</span>
+        </Label>
+        <PhotoPicker initialUrl={photoUrl} onSelect={handlePhoto} onRemove={handleRemovePhoto} />
+        <p className="text-xs text-muted-foreground">
+          No photo handy? You can skip this and just answer the questions below.
+        </p>
         {errors.photo && <p className="text-sm text-destructive">{errors.photo}</p>}
       </div>
 

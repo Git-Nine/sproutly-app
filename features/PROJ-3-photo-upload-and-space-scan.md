@@ -35,6 +35,7 @@
 
 ### Creating a scan
 - [ ] Given a logged-in user on the new-scan screen, when they provide a photo and fill the required fields (location, sun exposure, current surface, space type, size) and save, then the scan is stored and they land on its detail view with a "Space saved" confirmation.
+- [ ] Given a logged-in user on the new-scan screen, when they skip the photo (it is marked optional) and fill the required fields and save, then the scan is stored with no photo and the detail/list views render a neutral "No photo added" placeholder. *(Added 2026-06-24 — see Post-Deploy Enhancement.)*
 - [ ] Given a logged-in user, when they start a new scan, then they can either take a photo with the camera or choose one from their library (mobile), or drag/drop / browse (desktop).
 - [ ] Given a selected photo, when it loads, then a preview is shown with an option to retake/replace it before saving.
 - [ ] Given a photo with EXIF GPS data, when it is selected, then the coordinates are reverse-geocoded to prefill the postcode field (which the user can still edit/confirm) and retained for later enrichment (PROJ-4); the capture date is also read.
@@ -43,7 +44,7 @@
 ### Photo validation
 - [ ] Given a file that is an allowed image type (JPEG/PNG/WebP/HEIC) under 10 MB, when the user adds it, then it is accepted.
 - [ ] Given a disallowed file type or a file over 10 MB, when the user adds it, then an error is shown and no upload occurs.
-- [ ] Given the user tries to save without a photo, when they submit, then a validation error is shown and nothing is saved.
+- [ ] ~~Given the user tries to save without a photo, when they submit, then a validation error is shown and nothing is saved.~~ **Superseded 2026-06-24:** the photo is now optional — saving without one succeeds (see Post-Deploy Enhancement). The other required fields still block save when missing.
 
 ### Field validation
 - [ ] Given an empty or non-German postcode (not exactly 5 digits), when the user saves, then a validation error is shown and nothing is saved.
@@ -99,7 +100,8 @@
 |----------|-----------|------|
 | Capture photo + 5 manual fields (location, sun, surface, space type, size) | Enough signal for the PROJ-6 rule engine and gives PROJ-4 the location to enrich; stays short enough for the under-5-minute / low-friction goal (Maya) | 2026-06-18 |
 | Size captured as approximate area in square meters (numeric) | More precise input for the rule engine (plant counts/spacing) than coarse buckets; users can estimate m² for a typical garden/balcony | 2026-06-18 |
-| Photo required; manual fields required; space name optional | The photo and conditions are the point of a scan; a name is cosmetic and falls back to space type + date | 2026-06-18 |
+| ~~Photo required~~; manual fields required; space name optional | The photo and conditions are the point of a scan; a name is cosmetic and falls back to space type + date | 2026-06-18 |
+| **Photo now optional** (manual fields still required) | Reduces friction for the "Guilty Non-Starter" (Maya) — she can start from the conditions answers alone. The photo is purely a visual reference in v1 (AI vision is a non-goal), so the plan journey doesn't depend on it; the manual fields still carry all signal PROJ-4/PROJ-6 need | 2026-06-24 |
 | Capture *current surface* (incl. gravel/paved) | Directly serves the hardscape-to-garden conversion and grounds plans in reality (Thomas) | 2026-06-18 |
 | Multiple scans per user with a history list, each independently editable/deletable | Matches the per-space journey; sets up PROJ-9 progress logging; each scan will get its own plan (PROJ-6) | 2026-06-18 |
 | One photo per scan (multi-angle deferred) | Keeps capture fast and storage simple for v1; revisit when AI vision needs more angles | 2026-06-18 |
@@ -321,3 +323,16 @@ Production scan URLs (`/scans/<uuid>/plan`, `/shopping-list`, `/edit`) used the 
 - **Security:** unchanged — pages are auth-gated and RLS is owner-only, so the short code is not a security token. The migration touches no RLS policy.
 - **Tradeoff (chosen "Replace"):** old UUID-based bookmarks now 404. If preserving them matters, add a UUID-detection fallback in the scan page that redirects to the canonical short-code URL.
 - **Status:** code complete, typecheck + lint + 159 unit tests green. **Migration not yet applied to production** — apply `20260623100000_proj3_scan_short_code.sql` (Supabase push) before/with the next deploy.
+
+## Post-Deploy Enhancement — Optional photo (2026-06-24)
+
+The photo was mandatory at three layers (DB `NOT NULL`, form validation, the "save without a photo blocks" acceptance criterion). It is now **optional** so a user — especially Maya, the Guilty Non-Starter — can create a scan from the conditions questions alone, without finding/taking a photo. The other fields (postcode, sun, surface, space type, area) stay **required**: they're the signal PROJ-4 enrichment and PROJ-6 plan generation run on. The photo is only a visual reference in v1 (AI vision is a deferred non-goal), so the journey never depended on it.
+
+- **DB:** migration `20260624100000_proj3_photo_optional.sql` drops `NOT NULL` on `scans.photo_path`. No RLS / policy / storage change — a null path just means no object at `{user_id}/scans/{scan_id}/photo`.
+- **App (no schema-type change needed — `Scan.photo_path` was already `string | null`):**
+  - `scan-form.tsx` — removed the "Add a photo of your space" save-block; the photo label now reads "Photo (optional)" with a helper line ("No photo handy? You can skip this…"). Upload still only runs when a file is present.
+  - `photo-picker.tsx` — empty-state copy changed to "Add a photo of your space (optional)".
+  - **Remove photo (edit):** `PhotoPicker` gained a "Remove photo" button (shown whenever an image is present) and an `onRemove` callback. On save, removing a saved photo deletes the storage object (`storage.remove`, mirroring the delete-scan button), sets `photo_path = null`, and clears the photo-derived `lat`/`lng`/`taken_at`. Picking a new photo overrides a pending removal. In create mode the button just clears a fresh pick.
+  - `scans/[id]/page.tsx` — the no-photo detail view now shows a neutral `ImageOff` "No photo added" placeholder instead of a blank box. The "My Spaces" list (`scan-card.tsx`) and its batch thumbnail signing already tolerated null paths (icon placeholder) — no change needed.
+- **Security:** unchanged — pages stay auth-gated, RLS stays owner-only; the migration touches no policy. Client-side photo type/size validation still applies when a photo *is* provided.
+- **Status:** code complete, `tsc` + `npm run lint` clean, `scans.test.ts` 13/13 green. **Migration not yet applied to production** — apply `20260624100000_proj3_photo_optional.sql` (Supabase dashboard SQL Editor) before/with the next deploy. Until applied, saving without a photo will fail the DB `NOT NULL` constraint at runtime.

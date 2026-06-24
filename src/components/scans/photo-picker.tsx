@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Camera, ImageIcon, Loader2, RefreshCw, ImageOff } from 'lucide-react'
+import { Camera, ImageIcon, Loader2, RefreshCw, ImageOff, Trash2 } from 'lucide-react'
 import { readPhotoExif, isHeic, type PhotoExif } from '@/lib/image'
 import { validatePhotoFile, PHOTO_ACCEPT_ATTR } from '@/lib/scans'
 import { Button } from '@/components/ui/button'
@@ -10,11 +10,14 @@ import { Button } from '@/components/ui/button'
 export function PhotoPicker({
   initialUrl,
   onSelect,
+  onRemove,
 }: {
   /** Existing photo (signed URL) when editing; null for a new scan. */
   initialUrl: string | null
   /** Reports the chosen file + its EXIF (or null when nothing new is selected). */
   onSelect: (file: File | null, exif: PhotoExif | null) => void
+  /** Clears the photo: drops a fresh pick and marks an existing saved photo for removal. */
+  onRemove?: () => void
 }) {
   const cameraRef = useRef<HTMLInputElement>(null)
   const libraryRef = useRef<HTMLInputElement>(null)
@@ -49,6 +52,15 @@ export function PhotoPicker({
   }
 
   const hasImage = preview !== null || noPreview
+
+  function handleRemove() {
+    setPreview((prev) => {
+      if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev)
+      return null
+    })
+    setNoPreview(false)
+    onRemove?.()
+  }
 
   return (
     <div className="space-y-3">
@@ -105,7 +117,7 @@ export function PhotoPicker({
         ) : (
           <div className="flex flex-col items-center gap-1 px-6 text-center text-muted-foreground">
             <Camera className="h-7 w-7" />
-            <span className="text-sm">Take or upload a photo of your space</span>
+            <span className="text-sm">Add a photo of your space (optional)</span>
             <span className="text-xs">JPEG, PNG, WebP, or HEIC · max 10 MB</span>
           </div>
         )}
@@ -132,6 +144,19 @@ export function PhotoPicker({
           {hasImage ? 'Replace' : 'Library'}
         </Button>
       </div>
+
+      {hasImage && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="w-full text-muted-foreground hover:text-destructive"
+          disabled={reading}
+          onClick={handleRemove}
+        >
+          <Trash2 className="h-4 w-4" /> Remove photo
+        </Button>
+      )}
     </div>
   )
 }

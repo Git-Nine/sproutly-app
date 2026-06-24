@@ -1,6 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Pencil, Sparkles } from 'lucide-react'
+import { ArrowLeft, ImageOff, Pencil, Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
 import { DeleteScanButton } from '@/components/scans/delete-scan-button'
@@ -74,7 +74,10 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
             // eslint-disable-next-line @next/next/no-img-element
             <img src={photoUrl} alt={scanTitle(scan)} className="aspect-[4/3] w-full object-cover" />
           ) : (
-            <div className="aspect-[4/3] w-full" />
+            <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 text-muted-foreground">
+              <ImageOff className="h-7 w-7" />
+              <span className="text-xs">No photo added</span>
+            </div>
           )}
         </div>
 
