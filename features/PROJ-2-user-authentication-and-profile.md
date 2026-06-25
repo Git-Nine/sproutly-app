@@ -163,7 +163,7 @@ See the Technical Decisions table above. Key points: PKCE magic link + 6-digit c
 
 ### New Operator / Config Items (for `/backend` + setup)
 - Add a **server-only** `SUPABASE_SERVICE_ROLE_KEY` env var (never `NEXT_PUBLIC_`) — used solely by the delete-account route.
-- Supabase dashboard: include the **6-digit token** in the email template (enables the code fallback) and set the **Site URL + redirect URLs** for `/auth/callback`.
+- Supabase dashboard: include the **6-digit token** (`{{ .Token }}`) in **BOTH** email templates — **"Magic link or OTP"** (existing/returning users) **and "Confirm signup"** (first-ever email per address). `signInWithOtp` with the default `shouldCreateUser: true` sends the *Confirm signup* template on a user's first login and the *Magic link or OTP* template thereafter; if only one has the token, the code is missing on first login but present on subsequent ones. Also set the **Site URL + redirect URLs** for `/auth/callback`.
 
 ### Notes for Implementation
 - This feature needs **both** `/frontend` (login, profile, avatar UI) and `/backend` (callback route, profile update + avatar upload server logic, delete-account route, middleware route-gating).
@@ -212,7 +212,7 @@ See the Technical Decisions table above. Key points: PKCE magic link + 6-digit c
 **Operator config still required (not code):**
 - Apply the migration above.
 - Add `SUPABASE_SERVICE_ROLE_KEY` to `.env.local` (the secret/service-role key — **never** `NEXT_PUBLIC_`). `.env.local.example` could not be updated automatically (env files are permission-blocked); add the line there too.
-- Supabase dashboard: include the **6-digit token** in the magic-link email template; set **Site URL + redirect URLs** to allow `/auth/callback`.
+- Supabase dashboard: include the **6-digit token** (`{{ .Token }}`) in **BOTH** the **"Magic link or OTP"** and **"Confirm signup"** templates (first login uses *Confirm signup*, later logins use *Magic link or OTP* — see "New Operator / Config Items" above); set **Site URL + redirect URLs** to allow `/auth/callback`.
 
 **Verification:** `tsc --noEmit` clean · `next build` succeeds (all routes + Proxy) · tests **13/13** (env 4, delete route 4, callback route 5). Route tests cover happy path, 401 unauth, session-id-only authorization, 500 failure, valid/invalid/missing code, and the open-redirect guard.
 
@@ -353,6 +353,14 @@ Re-ran `/qa` on `proj-2-qa` after the fixes. **Verdict: READY** — no Critical 
 - `route.test.ts` — 6 tests incl. recursive removal, no-files skip, storage-failure tolerance, auth gate, caller-id, 500-on-delete-failure.
 
 **Verification:** unit 133/133 ✓, `tsc`/`lint`/`build` ✓. Accumulated test users cleared post-fix. Recommended manual smoke at deploy: delete a throwaway account end-to-end and confirm both the row and its photos are gone.
+
+## Post-Deploy Fix — OTP code missing on first login (2026-06-25)
+
+**Symptom (found in live testing):** when signing in with a brand-new email, the email contained only the magic link, **no 6-digit code**. On the *second* login with the same address, the code appeared. The **"Magic link or OTP"** template already had `{{ .Token }}`.
+
+**Cause (not code — dashboard config):** `signInWithOtp({ email })` runs with the default `shouldCreateUser: true` (`src/components/auth/login-form.tsx:39`). On a user's **first** sign-in the address doesn't exist yet, so Supabase treats it as a sign-up and sends the **"Confirm signup"** email template — *not* the "Magic link or OTP" template. Only the latter had `{{ .Token }}`, so first-login emails carried no code; every subsequent login (user now exists) used the "Magic link or OTP" template and showed the code. The code path is correct: `verifyOtp({ type: 'email' })` (`login-form.tsx:57`) verifies both the signup and magic-link OTPs.
+
+**Fix:** add the OTP block (`<p>Or enter this 6-digit code:</p><h2 style="letter-spacing:4px;">{{ .Token }}</h2>`) to the **"Confirm signup"** template too (Supabase → Authentication → Emails), so the token is present on first login. No code change required. Verify with a never-seen email address.
 
 ## Deployment
 _To be added by /deploy_
