@@ -139,8 +139,9 @@ export type ConstraintViolation = {
  *
  * A correct plan returns `[]`. A non-empty result means a plant that could die
  * in this space slipped into the recommendation — the thing this guardrail
- * exists to catch before a user ever sees it. The plan view (PROJ-7) and the
- * CI test both assert this is empty.
+ * exists to catch before a user ever sees it. The CI test asserts this is empty
+ * across the seed catalogue; wiring it into the plan view as a runtime/dev
+ * assertion is a follow-up.
  */
 export function findConstraintViolations(plan: GeneratedPlan): ConstraintViolation[] {
   const { sun, zone, area_sqm } = plan.snapshot
