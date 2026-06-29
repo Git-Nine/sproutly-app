@@ -32,6 +32,15 @@ const catalogue: Plant[] = (PLANTS as Record<string, unknown>[]).map((p, i) => (
 const enrichment = (over: Partial<NonNullable<GeneratePlanInput['enrichment']>> = {}) =>
   ({ soil_type: 'loam', soil_status: 'success', hardiness_zone: '7', zone_status: 'success', ...over }) as GeneratePlanInput['enrichment']
 
+/** Check a generated plan against its own snapshot (sun/zone/area). */
+const violationsOf = (plan: GeneratedPlan) =>
+  findConstraintViolations({
+    plants: plan.lines.map((l) => l.plant),
+    sun: plan.snapshot.sun,
+    zone: plan.snapshot.zone,
+    areaSqm: plan.snapshot.area_sqm,
+  })
+
 describe('findConstraintViolations (the guardrail itself)', () => {
   // Build a plan, then tamper with its lines to simulate a pipeline regression
   // that leaked an unsurvivable plant. A trustworthy guardrail must catch each.
@@ -44,13 +53,13 @@ describe('findConstraintViolations (the guardrail itself)', () => {
     })
 
   it('passes a correctly generated plan (no violations)', () => {
-    expect(findConstraintViolations(basePlan())).toEqual([])
+    expect(violationsOf(basePlan())).toEqual([])
   })
 
   it('flags a plant whose sun tolerance excludes the site sun', () => {
     const plan = basePlan()
     plan.lines[0].plant = { ...plan.lines[0].plant, sun_tolerance: ['shade'] } // site is full sun
-    const v = findConstraintViolations(plan)
+    const v = violationsOf(plan)
     expect(v).toHaveLength(1)
     expect(v[0].reasons).toContain('sun')
   })
@@ -58,7 +67,7 @@ describe('findConstraintViolations (the guardrail itself)', () => {
   it('flags a plant not hardy enough for the site winter zone', () => {
     const plan = basePlan() // snapshot.zone === 7
     plan.lines[0].plant = { ...plan.lines[0].plant, min_hardiness_zone: 9 }
-    const v = findConstraintViolations(plan)
+    const v = violationsOf(plan)
     expect(v).toHaveLength(1)
     expect(v[0].reasons).toContain('zone')
   })
@@ -66,7 +75,7 @@ describe('findConstraintViolations (the guardrail itself)', () => {
   it('flags a plant too large to physically fit the area', () => {
     const plan = basePlan() // area 30 m²
     plan.lines[0].plant = { ...plan.lines[0].plant, mature_spread_cm: 1000 } // 100 m² footprint
-    const v = findConstraintViolations(plan)
+    const v = violationsOf(plan)
     expect(v).toHaveLength(1)
     expect(v[0].reasons).toContain('fit')
   })
@@ -80,7 +89,7 @@ describe('findConstraintViolations (the guardrail itself)', () => {
     })
     plan.lines[0].plant = { ...plan.lines[0].plant, min_hardiness_zone: 11 }
     // Zone is null in the snapshot → the zone filter is intentionally not applied.
-    expect(findConstraintViolations(plan).every((x) => !x.reasons.includes('zone'))).toBe(true)
+    expect(violationsOf(plan).every((x) => !x.reasons.includes('zone'))).toBe(true)
   })
 })
 
@@ -110,7 +119,7 @@ describe('the real engine never violates its own survival constraints', () => {
               maintenancePreference: null,
             })
             plansChecked += 1
-            const violations = findConstraintViolations(plan)
+            const violations = violationsOf(plan)
             // Surface the offending plant in the failure message, not just a boolean.
             expect(
               violations,

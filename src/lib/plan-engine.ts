@@ -129,30 +129,44 @@ export type ConstraintViolation = {
   reasons: ('sun' | 'zone' | 'fit')[]
 }
 
+/** The fields the guardrail needs from each plant under review. */
+type PlantSurvivalFields = Pick<
+  Plant,
+  'id' | 'common_name' | 'sun_tolerance' | 'min_hardiness_zone' | 'mature_spread_cm'
+>
+
 /**
- * GUARDRAIL (PROJ-6): re-derive, from the plan's OWN snapshot, whether every
- * recommended plant truly clears the site's HARD survival constraints — sun,
- * winter zone (when known), and physical fit. This deliberately does NOT call
- * `matchingSurvivors`: it independently re-checks the result so a regression in
- * the selection pipeline (or a bad catalogue row) can't hide behind the same
- * code that produced it.
+ * GUARDRAIL (PROJ-6): independently re-derive whether every plant in a plan truly
+ * clears the site's HARD survival constraints — sun, winter zone (when known),
+ * and physical fit. This deliberately does NOT call `matchingSurvivors`, so a
+ * regression in the selection pipeline (or a bad catalogue row) can't hide behind
+ * the same code that produced the plan.
  *
- * A correct plan returns `[]`. A non-empty result means a plant that could die
- * in this space slipped into the recommendation — the thing this guardrail
- * exists to catch before a user ever sees it. The CI test asserts this is empty
- * across the seed catalogue; wiring it into the plan view as a runtime/dev
- * assertion is a follow-up.
+ * Takes the plants plus the three site values directly (rather than a full
+ * `GeneratedPlan`) so it checks BOTH a freshly generated plan and a persisted one
+ * read back from the database — `zone` is the resolved `siteZone(enrichment)`, or
+ * `null` when unconfirmed (the zone filter is then skipped, matching generation).
+ *
+ * A clean plan returns `[]`. A non-empty result means a plant that could die in
+ * this space slipped into the recommendation — what this guardrail exists to
+ * catch. The CI test asserts this is empty across the seed catalogue; the plan
+ * view logs it as a dev-only assertion.
  */
-export function findConstraintViolations(plan: GeneratedPlan): ConstraintViolation[] {
-  const { sun, zone, area_sqm } = plan.snapshot
+export function findConstraintViolations(input: {
+  plants: PlantSurvivalFields[]
+  sun: SunExposure
+  zone: number | null
+  areaSqm: number
+}): ConstraintViolation[] {
+  const { plants, sun, zone, areaSqm } = input
   const violations: ConstraintViolation[] = []
-  for (const line of plan.lines) {
+  for (const plant of plants) {
     const reasons: ConstraintViolation['reasons'] = []
-    if (!line.plant.sun_tolerance.includes(sun)) reasons.push('sun')
-    if (zone !== null && zone < line.plant.min_hardiness_zone) reasons.push('zone')
-    if (footprintSqm(line.plant) > area_sqm) reasons.push('fit')
+    if (!plant.sun_tolerance.includes(sun)) reasons.push('sun')
+    if (zone !== null && zone < plant.min_hardiness_zone) reasons.push('zone')
+    if (footprintSqm(plant) > areaSqm) reasons.push('fit')
     if (reasons.length > 0) {
-      violations.push({ plantId: line.plant.id, commonName: line.plant.common_name, reasons })
+      violations.push({ plantId: plant.id, commonName: plant.common_name, reasons })
     }
   }
   return violations
