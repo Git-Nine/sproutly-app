@@ -362,5 +362,14 @@ Re-ran `/qa` on `proj-2-qa` after the fixes. **Verdict: READY** — no Critical 
 
 **Fix:** add the OTP block (`<p>Or enter this 6-digit code:</p><h2 style="letter-spacing:4px;">{{ .Token }}</h2>`) to the **"Confirm signup"** template too (Supabase → Authentication → Emails), so the token is present on first login. No code change required. Verify with a never-seen email address.
 
+## CI/CD — Build & Test gate (2026-06-25)
+
+> Project-wide CI, recorded here because the build depends on the Supabase env this feature introduced (`src/lib/supabase/env.ts`). Applies to all features, not just PROJ-2.
+
+- **Workflow:** `.github/workflows/ci.yml` — runs on every pull request: `npm ci` → `npm run lint` → `npm test` (Vitest) → `npm run build` (next build). Playwright E2E is intentionally excluded (needs browsers + a live app + Supabase).
+- **Required secrets (GitHub → Settings → Secrets and variables → Actions):** `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. `next build` validates these at build time via `getSupabaseEnv()`, so without them the Build step fails (Vercel injects them automatically, so its preview still succeeds). Both are public-safe; the **service-role key is never used in CI**.
+- **Branch protection on `main`:** the `build-test` check is **required** + "branch must be up to date" (strict); force-pushes and deletions blocked. `enforce_admins` is **off** (admins can override in an emergency). A PR cannot merge until `build-test` is green.
+- **Repo went public (2026-06-25)** to unlock branch protection on the free plan. History was scanned: no `.env` files or secret values were ever committed — only references to the variable *name*.
+
 ## Deployment
 _To be added by /deploy_

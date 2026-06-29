@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 import { Loader2, Mail } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { authErrorMessage } from '@/lib/auth-errors'
 import { emailSchema, otpSchema, type EmailValues, type OtpValues } from '@/lib/profile'
 import { safeReturnTo } from '@/lib/safe-return-to'
 import { Logo } from '@/components/brand/logo'
@@ -36,32 +37,41 @@ export function LoginForm({
   })
 
   async function sendLink({ email }: EmailValues) {
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback?returnTo=${encodeURIComponent(returnTo)}` },
-    })
-    if (error) {
-      toast.error(
-        error.status === 429
-          ? 'Too many requests — please wait a minute before trying again.'
-          : error.message || 'Could not send the link. Please try again.',
-      )
-      return
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback?returnTo=${encodeURIComponent(returnTo)}` },
+      })
+      if (error) {
+        console.error('[auth] signInWithOtp returned an error', error)
+        toast.error(authErrorMessage(error, 'Could not send the link. Please try again.'))
+        return
+      }
+      setSentTo(email)
+      toast.success('Check your email for a link and a 6-digit code.')
+    } catch (err) {
+      // Network failure / unexpected throw — previously swallowed silently.
+      console.error('[auth] signInWithOtp threw', err)
+      toast.error('Something went wrong sending the link. Please check your connection and try again.')
     }
-    setSentTo(email)
-    toast.success('Check your email for a link and a 6-digit code.')
   }
 
   async function verifyCode({ token }: OtpValues) {
     if (!sentTo) return
-    const { data, error } = await supabase.auth.verifyOtp({ email: sentTo, token, type: 'email' })
-    if (error || !data.session) {
-      toast.error(error?.message || 'That code is invalid or expired. Request a new one.')
-      return
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({ email: sentTo, token, type: 'email' })
+      if (error || !data.session) {
+        console.error('[auth] verifyOtp failed', error)
+        toast.error(authErrorMessage(error, 'That code is invalid or expired. Request a new one.'))
+        return
+      }
+      // Full reload so the new session cookie is picked up by the server everywhere.
+      // Re-sanitize at the redirect site (defense-in-depth against open redirect).
+      window.location.href = safeReturnTo(returnTo)
+    } catch (err) {
+      console.error('[auth] verifyOtp threw', err)
+      toast.error('Something went wrong verifying the code. Please check your connection and try again.')
     }
-    // Full reload so the new session cookie is picked up by the server everywhere.
-    // Re-sanitize at the redirect site (defense-in-depth against open redirect).
-    window.location.href = safeReturnTo(returnTo)
   }
 
   async function resend() {
