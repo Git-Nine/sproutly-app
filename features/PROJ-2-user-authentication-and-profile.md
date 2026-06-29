@@ -1,8 +1,8 @@
 # PROJ-2: User Authentication & Profile
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (re-QA — READY: BUG-1/BUG-7 fixed, two-account ACs verified)
+**Last Updated:** 2026-06-29 (Deployed — merged to main via PR #5, auto-deploys on Vercel; login error hardening + error boundaries)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — magic-link auth provider, `users` profile table, RLS, private `photos` bucket, and session-refresh middleware.
