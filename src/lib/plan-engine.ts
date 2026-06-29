@@ -121,6 +121,42 @@ export function matchingSurvivors(
   )
 }
 
+/** A recommended plant that should never have been recommended for this site. */
+export type ConstraintViolation = {
+  plantId: string
+  commonName: string
+  /** Which hard survival constraint(s) the recommendation breaks. */
+  reasons: ('sun' | 'zone' | 'fit')[]
+}
+
+/**
+ * GUARDRAIL (PROJ-6): re-derive, from the plan's OWN snapshot, whether every
+ * recommended plant truly clears the site's HARD survival constraints — sun,
+ * winter zone (when known), and physical fit. This deliberately does NOT call
+ * `matchingSurvivors`: it independently re-checks the result so a regression in
+ * the selection pipeline (or a bad catalogue row) can't hide behind the same
+ * code that produced it.
+ *
+ * A correct plan returns `[]`. A non-empty result means a plant that could die
+ * in this space slipped into the recommendation — the thing this guardrail
+ * exists to catch before a user ever sees it. The plan view (PROJ-7) and the
+ * CI test both assert this is empty.
+ */
+export function findConstraintViolations(plan: GeneratedPlan): ConstraintViolation[] {
+  const { sun, zone, area_sqm } = plan.snapshot
+  const violations: ConstraintViolation[] = []
+  for (const line of plan.lines) {
+    const reasons: ConstraintViolation['reasons'] = []
+    if (!line.plant.sun_tolerance.includes(sun)) reasons.push('sun')
+    if (zone !== null && zone < line.plant.min_hardiness_zone) reasons.push('zone')
+    if (footprintSqm(line.plant) > area_sqm) reasons.push('fit')
+    if (reasons.length > 0) {
+      violations.push({ plantId: line.plant.id, commonName: line.plant.common_name, reasons })
+    }
+  }
+  return violations
+}
+
 /**
  * PROJ-7 rebalance: given a FIXED set of plants (the user's edited selection) and a
  * map of pinned plant_id → quantity, compute every plant's quantity. Pinned plants

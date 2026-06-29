@@ -2,7 +2,14 @@
 
 ## Status: Deployed
 **Created:** 2026-06-22
-**Last Updated:** 2026-06-22
+**Last Updated:** 2026-06-29
+
+## Post-Deploy Enhancement — Survival-constraint guardrail (2026-06-29)
+Added an explicit, enforced invariant for the failure "the planner recommends a plant that can't survive this site." The engine already only ever selects `matchingSurvivors`, so the property held *implicitly*; this makes it **explicit and independently verified** so a future pipeline regression or a bad catalogue row can't silently leak an unsurvivable plant into a plan.
+
+- **`findConstraintViolations(plan)`** (`src/lib/plan-engine.ts`) — a pure check that re-derives, from the plan's **own `snapshot`** (sun, zone, area), whether every recommended plant clears the hard survival filters (sun tolerance, winter hardiness zone when known, physical fit). It deliberately does **not** call `matchingSurvivors`, so it can't hide behind the same code that produced the plan. A correct plan returns `[]`.
+- **Co-located test** (`src/lib/plan-engine.guardrail.test.ts`) — proves the guardrail *detects* (tampered lines for each of sun/zone/fit, plus the zone-unconfirmed exemption) and *prevents* (runs the engine over the **real seed catalogue** across a 252-site matrix of sun × area × zone × surface and asserts zero violations; the matrix count is itself asserted so it can't silently skip).
+- **Where it runs:** `npm test` / CI. No DB or schema change, no runtime behaviour change to a correct engine — purely a regression net around the survival promise.
 
 ## Dependencies
 - Requires: **PROJ-3 (Photo Upload & Space Scan)** — a plan is generated *for a saved scan*. The engine reads the scan's `sun_exposure` (always present — the hard sun filter), `area_sqm` (drives quantities), `surface` (prep note + density), and `space_type` (compact preference). PROJ-3 also rendered the disabled **"Generate plan"** seam on the scan detail that PROJ-6 now wires up.
