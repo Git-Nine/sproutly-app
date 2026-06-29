@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
 import { Montserrat, Fraunces, IBM_Plex_Mono } from 'next/font/google'
+import { Analytics } from '@vercel/analytics/next'
+import { SpeedInsights } from '@vercel/speed-insights/next'
 import { Toaster } from '@/components/ui/sonner'
 import { Providers } from './providers'
 import './globals.css'
@@ -28,6 +30,8 @@ export default function RootLayout({
       <body className={`${sans.variable} ${serif.variable} ${mono.variable} antialiased`}>
         <Providers>{children}</Providers>
         <Toaster />
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   )
