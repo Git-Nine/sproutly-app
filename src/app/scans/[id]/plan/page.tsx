@@ -15,7 +15,7 @@ import {
   type Plan,
   type PlanPlantWithPlant,
 } from '@/lib/plans'
-import { matchingSurvivors } from '@/lib/plan-engine'
+import { matchingSurvivors, findConstraintViolations, siteZone } from '@/lib/plan-engine'
 
 export default async function PlanPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -57,6 +57,24 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   // Plants that suit the space (for the "add more" list) and whether the plan is stale.
   const allSurvivors = matchingSurvivors({ scan, enrichment, catalogue })
   const stale = isPlanStale(plan, { scan, enrichment, maintenancePreference })
+
+  // GUARDRAIL (PROJ-6): in dev, assert the *persisted* plan only shows plants that
+  // can survive this site — catches a stale plan or a delete-reassignment swap that
+  // leaked an unsurvivable plant into the stored lines. Logs only; never blocks render.
+  if (process.env.NODE_ENV !== 'production') {
+    const violations = findConstraintViolations({
+      plants: lines.map((l) => l.plants).filter((p): p is Plant => p !== null),
+      sun: scan.sun_exposure,
+      zone: siteZone(enrichment),
+      areaSqm: scan.area_sqm,
+    })
+    if (violations.length > 0) {
+      console.error(
+        `[PROJ-6 guardrail] Plan ${plan.id} (scan ${scan.id}) shows unsurvivable plant(s):`,
+        violations,
+      )
+    }
+  }
 
   return (
     <div className="min-h-screen bg-background">
