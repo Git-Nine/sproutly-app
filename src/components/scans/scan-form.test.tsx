@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { toast } from 'sonner'
 import { ScanForm } from './scan-form'
 
 /**
@@ -129,5 +130,61 @@ describe('ScanForm — n8n scan-vision prefill', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     expect(area.value).toBe('')
     expect(screen.queryByText(/we filled in what we could see/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('ScanForm — "Use my location" postcode fallback', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('reverse-geocodes the device location into the postcode field', async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (String(url).includes('/api/geocode')) {
+        return { ok: true, json: async () => ({ postcode: '10115' }) }
+      }
+      return { ok: false, json: async () => ({}) }
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    // Device grants location: fire the success callback with Berlin-ish coords.
+    const getCurrentPosition = vi.fn((success: PositionCallback) =>
+      success({ coords: { latitude: 52.53, longitude: 13.38 } } as GeolocationPosition),
+    )
+    vi.stubGlobal('navigator', { geolocation: { getCurrentPosition } })
+
+    render(<ScanForm userId={USER_ID} scan={null} photoUrl={null} />)
+    fireEvent.click(screen.getByRole('button', { name: /use my location/i }))
+
+    // It reverse-geocodes the device coordinates...
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith('/api/geocode', expect.objectContaining({ method: 'POST' })),
+    )
+    const call = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/geocode'))!
+    expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({ lat: 52.53, lng: 13.38 })
+
+    // ...and the returned postcode lands in the editable field with the source hint.
+    const postcode = screen.getByLabelText(/postcode/i) as HTMLInputElement
+    await waitFor(() => expect(postcode.value).toBe('10115'))
+    expect(screen.getByText(/filled from your current location/i)).toBeInTheDocument()
+  })
+
+  it('shows an error toast and leaves the postcode blank when permission is denied', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, json: async () => ({}) }))
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    // Device denies location: fire the error callback with PERMISSION_DENIED.
+    const getCurrentPosition = vi.fn((_success: PositionCallback, error: PositionErrorCallback) =>
+      error({ code: 1, PERMISSION_DENIED: 1 } as GeolocationPositionError),
+    )
+    vi.stubGlobal('navigator', { geolocation: { getCurrentPosition } })
+
+    render(<ScanForm userId={USER_ID} scan={null} photoUrl={null} />)
+    fireEvent.click(screen.getByRole('button', { name: /use my location/i }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/permission denied/i)))
+    expect(fetchMock).not.toHaveBeenCalled()
+    const postcode = screen.getByLabelText(/postcode/i) as HTMLInputElement
+    expect(postcode.value).toBe('')
   })
 })

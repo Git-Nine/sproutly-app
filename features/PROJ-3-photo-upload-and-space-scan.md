@@ -370,3 +370,16 @@ Realises the PRD's **Scan AI swap-in point** (*"EXIF + manual form → vision mo
 
 - **Tests:** co-located `scan-form.test.tsx` (2 tests) — asserts a picked photo triggers `/api/classify-vision` with a `photo_path` in the user's namespace and prefills the area field + shows the hint on `ok`; and that a fallback read leaves fields blank with no hint. Full suite **192/192 green**, `tsc` + `npm run lint` clean.
 - **Status:** app code complete and tested. **Not yet live** — requires the ops steps in `docs/n8n-scan-vision-workflow.md`: stand up the n8n instance + import the workflow + create the Anthropic / Header-Auth credentials, and set `N8N_CLASSIFY_WEBHOOK_URL` + `N8N_CLASSIFY_SECRET` in Vercel. Until those env vars are set, the route returns its graceful fallback and the form behaves exactly as before (manual entry).
+
+## Post-Deploy Enhancement — "Use my location" postcode fallback (2026-07-02)
+
+Closes the coverage gap in the existing photo-GPS → postcode auto-fill: that path only fires when the uploaded photo carries GPS EXIF, which many photos lack (screenshots, downloads, messaging apps that strip EXIF on send, or cameras with location tagging off) — and it never fires at all when the user skips the photo. Vision-based postcode extraction was considered and rejected: a garden/balcony photo contains no readable postcode, so it would add wrong guesses, not coverage. The device's own geolocation is the reliable fallback.
+
+**What changed (`src/components/scans/scan-form.tsx`, frontend-only):**
+- Extracted the reverse-geocode call into a module-level `geocodeToPostcode(lat, lng)` helper (returns `null` on any miss, never throws) — reused by both the photo-EXIF path and the new location path. No new API route: it reuses the existing auth-gated `POST /api/geocode` (Nominatim, Germany-first).
+- New **"Use my location"** link-button under the postcode field, shown **only while the postcode is empty** (it disappears once a value is present — auto-filled or typed). Calls `navigator.geolocation.getCurrentPosition`, reverse-geocodes the coordinates, and fills the postcode. Shows a "Finding your location…" spinner while resolving. Because it's an explicit user action, it sets `postcodeTouched` so a later photo auto-fill won't silently override it.
+- The auto-fill hint is now **source-aware**: `autofilled: boolean` became `autofillSource: 'photo' | 'location' | null`, rendering "Filled from your photo's location" vs "Filled from your current location" — both "— edit if needed".
+- Graceful degradation with a toast on every failure branch: no geolocation API, permission denied, no German postcode match, or upstream failure → the user just types the postcode manually. Never blocks the scan.
+
+- **Tests:** co-located `scan-form.test.tsx` grew by 2 (now 4 total) — asserts clicking "Use my location" reverse-geocodes the device coordinates into the postcode field with the "current location" hint, and that a `PERMISSION_DENIED` error shows a toast, calls no geocode fetch, and leaves the field blank. Full suite **194/194 green**, `tsc` + `npm run lint` clean.
+- **Status:** complete and live-ready — no new env vars, no DB change, no ops steps. Ships on the next push to `main`.

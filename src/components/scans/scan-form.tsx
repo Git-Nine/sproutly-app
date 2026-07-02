@@ -44,6 +44,29 @@ type ClassifyResponse = {
   message?: string
 }
 
+/** Where an auto-filled postcode came from — drives the "edit if needed" hint. */
+type AutofillSource = 'photo' | 'location' | null
+
+/**
+ * Reverse-geocode coordinates to a German postcode via POST /api/geocode.
+ * Returns null on any miss (non-DE location, no match, upstream/network failure)
+ * so callers fall back to manual entry — never throws.
+ */
+async function geocodeToPostcode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch('/api/geocode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng }),
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { postcode?: string | null }
+    return data.postcode ?? null
+  } catch {
+    return null
+  }
+}
+
 export function ScanForm({
   userId,
   scan,
@@ -68,7 +91,8 @@ export function ScanForm({
   const [name, setName] = useState(scan?.name ?? '')
   const [postcode, setPostcode] = useState(scan?.postcode ?? '')
   const [postcodeTouched, setPostcodeTouched] = useState(Boolean(scan?.postcode))
-  const [autofilled, setAutofilled] = useState(false)
+  const [autofillSource, setAutofillSource] = useState<AutofillSource>(null)
+  const [locating, setLocating] = useState(false)
   const [sun, setSun] = useState<string>(scan?.sun_exposure ?? '')
   const [surface, setSurface] = useState<string>(scan?.surface ?? '')
   const [spaceType, setSpaceType] = useState<string>(scan?.space_type ?? '')
@@ -94,21 +118,10 @@ export function ScanForm({
 
     // Auto-fill postcode from the photo's GPS — only if the user hasn't typed one.
     if (pickedExif?.lat != null && pickedExif?.lng != null && !postcodeTouched) {
-      try {
-        const res = await fetch('/api/geocode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lat: pickedExif.lat, lng: pickedExif.lng }),
-        })
-        if (res.ok) {
-          const data = (await res.json()) as { postcode?: string | null }
-          if (data.postcode && !postcodeTouched) {
-            setPostcode(data.postcode)
-            setAutofilled(true)
-          }
-        }
-      } catch {
-        // Silent fallback — the user just enters the postcode manually.
+      const pc = await geocodeToPostcode(pickedExif.lat, pickedExif.lng)
+      if (pc && !postcodeTouched) {
+        setPostcode(pc)
+        setAutofillSource('photo')
       }
     }
 
@@ -166,6 +179,43 @@ export function ScanForm({
     } finally {
       setClassifying(false)
     }
+  }
+
+  /**
+   * Fallback for photos with no GPS (screenshots, EXIF stripped by messaging apps,
+   * or no photo at all): read the device's location and reverse-geocode it to a
+   * postcode via the same /api/geocode route. Explicit user action, so it wins over
+   * any later photo auto-fill (postcodeTouched). Degrades to manual entry with a toast.
+   */
+  function handleUseLocation() {
+    if (!('geolocation' in navigator)) {
+      toast.error("Location isn't available on this device. Please enter your postcode.")
+      return
+    }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const pc = await geocodeToPostcode(pos.coords.latitude, pos.coords.longitude)
+        if (pc) {
+          setPostcode(pc)
+          setPostcodeTouched(true)
+          setAutofillSource('location')
+          setErrors((e) => ({ ...e, postcode: undefined }))
+        } else {
+          toast.error("We couldn't find a German postcode for your location. Please enter it manually.")
+        }
+        setLocating(false)
+      },
+      (err) => {
+        toast.error(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied. Please enter your postcode manually.'
+            : "We couldn't get your location. Please enter your postcode manually.",
+        )
+        setLocating(false)
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
+    )
   }
 
   function handleRemovePhoto() {
@@ -333,15 +383,40 @@ export function ScanForm({
           onChange={(e) => {
             setPostcode(e.target.value.replace(/\D/g, '').slice(0, 5))
             setPostcodeTouched(true)
-            setAutofilled(false)
+            setAutofillSource(null)
           }}
           aria-invalid={!!errors.postcode}
         />
-        {autofilled && !errors.postcode && (
-          <p className="inline-flex items-center gap-1 text-xs text-accent">
-            <MapPin className="h-3 w-3" /> Filled from your photo&apos;s location — edit if needed
-          </p>
-        )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {!postcode && (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-xs"
+              onClick={handleUseLocation}
+              disabled={locating}
+            >
+              {locating ? (
+                <>
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Finding your location…
+                </>
+              ) : (
+                <>
+                  <MapPin className="mr-1 h-3 w-3" /> Use my location
+                </>
+              )}
+            </Button>
+          )}
+          {autofillSource && !errors.postcode && (
+            <span className="text-xs text-accent">
+              {autofillSource === 'photo'
+                ? "Filled from your photo's location"
+                : 'Filled from your current location'}{' '}
+              — edit if needed
+            </span>
+          )}
+        </div>
         {errors.postcode && <p className="text-sm text-destructive">{errors.postcode}</p>}
       </div>
 
