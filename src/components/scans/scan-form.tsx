@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Loader2, MapPin } from 'lucide-react'
+import { Loader2, MapPin, Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { downscaleImage, type PhotoExif } from '@/lib/image'
 import {
@@ -32,6 +32,41 @@ import {
 
 type Errors = Partial<Record<'photo' | 'name' | 'postcode' | 'sun_exposure' | 'surface' | 'space_type' | 'area_sqm', string>>
 
+/**
+ * Response contract of POST /api/classify-vision (the n8n scan-vision AI prefill).
+ * Kept as a local shape rather than imported from the route module so this client
+ * component never pulls in server-only code. See docs/n8n-scan-vision-workflow.md.
+ */
+type ClassifyResponse = {
+  status: 'ok' | 'low_confidence' | 'rejected'
+  fields: { surface: string; space_type: string; sun_exposure: string; area_sqm: number } | null
+  confidence?: number
+  message?: string
+}
+
+/** Where an auto-filled postcode came from — drives the "edit if needed" hint. */
+type AutofillSource = 'photo' | 'location' | null
+
+/**
+ * Reverse-geocode coordinates to a German postcode via POST /api/geocode.
+ * Returns null on any miss (non-DE location, no match, upstream/network failure)
+ * so callers fall back to manual entry — never throws.
+ */
+async function geocodeToPostcode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch('/api/geocode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng }),
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as { postcode?: string | null }
+    return data.postcode ?? null
+  } catch {
+    return null
+  }
+}
+
 export function ScanForm({
   userId,
   scan,
@@ -46,19 +81,30 @@ export function ScanForm({
   const supabase = createClient()
   const router = useRouter()
 
+  // Stable id for this scan across classify + save, so the AI prefill uploads the
+  // photo to the SAME storage path the save will persist (no double upload).
+  const [scanId] = useState(() => scan?.id ?? crypto.randomUUID())
+
   const [file, setFile] = useState<File | null>(null)
   const [exif, setExif] = useState<PhotoExif | null>(null)
   const [removePhoto, setRemovePhoto] = useState(false)
   const [name, setName] = useState(scan?.name ?? '')
   const [postcode, setPostcode] = useState(scan?.postcode ?? '')
   const [postcodeTouched, setPostcodeTouched] = useState(Boolean(scan?.postcode))
-  const [autofilled, setAutofilled] = useState(false)
+  const [autofillSource, setAutofillSource] = useState<AutofillSource>(null)
+  const [locating, setLocating] = useState(false)
   const [sun, setSun] = useState<string>(scan?.sun_exposure ?? '')
   const [surface, setSurface] = useState<string>(scan?.surface ?? '')
   const [spaceType, setSpaceType] = useState<string>(scan?.space_type ?? '')
   const [area, setArea] = useState<string>(scan ? String(scan.area_sqm) : '')
   const [errors, setErrors] = useState<Errors>({})
   const [saving, setSaving] = useState(false)
+  const [classifying, setClassifying] = useState(false)
+  const [prefilled, setPrefilled] = useState(false)
+
+  // Remembers which File was already uploaded (and to where) during AI prefill,
+  // so handleSave can skip re-uploading the identical bytes.
+  const uploadedRef = useRef<{ file: File; path: string } | null>(null)
 
   const isEdit = scan !== null
 
@@ -67,26 +113,109 @@ export function ScanForm({
     setExif(pickedExif)
     setRemovePhoto(false) // picking a photo overrides a pending removal
     setErrors((e) => ({ ...e, photo: undefined }))
+    setPrefilled(false)
+    uploadedRef.current = null // a new pick invalidates any earlier upload
 
     // Auto-fill postcode from the photo's GPS — only if the user hasn't typed one.
     if (pickedExif?.lat != null && pickedExif?.lng != null && !postcodeTouched) {
-      try {
-        const res = await fetch('/api/geocode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lat: pickedExif.lat, lng: pickedExif.lng }),
-        })
-        if (res.ok) {
-          const data = (await res.json()) as { postcode?: string | null }
-          if (data.postcode && !postcodeTouched) {
-            setPostcode(data.postcode)
-            setAutofilled(true)
-          }
-        }
-      } catch {
-        // Silent fallback — the user just enters the postcode manually.
+      const pc = await geocodeToPostcode(pickedExif.lat, pickedExif.lng)
+      if (pc && !postcodeTouched) {
+        setPostcode(pc)
+        setAutofillSource('photo')
       }
     }
+
+    // AI prefill (PROJ-3 swap-in point): let the vision workflow read the photo and
+    // pre-fill the conditions. This is the "Reading your space…" step; the user still
+    // reviews and edits everything before saving.
+    if (picked) await classifyPhoto(picked)
+  }
+
+  /**
+   * Uploads the picked photo to its final storage path and asks the n8n scan-vision
+   * workflow to classify it, prefilling the four conditions on a confident read.
+   * Degrades silently to the manual form on any failure — never blocks the user.
+   */
+  async function classifyPhoto(picked: File) {
+    setClassifying(true)
+    try {
+      const optimized = await downscaleImage(picked)
+      const path = scanPhotoPath(userId, scanId)
+      const { error: uploadError } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(path, optimized, { upsert: true, contentType: optimized.type })
+      if (uploadError) throw uploadError
+      uploadedRef.current = { file: picked, path }
+
+      const res = await fetch('/api/classify-vision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photo_path: path,
+          postcode: postcode || undefined,
+          scan_draft_id: scanId,
+        }),
+      })
+      if (!res.ok) return
+
+      const data = (await res.json()) as ClassifyResponse
+      if (data.status === 'ok' && data.fields) {
+        setSun(data.fields.sun_exposure)
+        setSurface(data.fields.surface)
+        setSpaceType(data.fields.space_type)
+        setArea(String(data.fields.area_sqm))
+        setErrors((e) => ({
+          ...e,
+          sun_exposure: undefined,
+          surface: undefined,
+          space_type: undefined,
+          area_sqm: undefined,
+        }))
+        setPrefilled(true)
+      }
+    } catch (err) {
+      // Silent — the user just fills in the fields manually.
+      console.error('[classify-vision] prefill failed:', err)
+    } finally {
+      setClassifying(false)
+    }
+  }
+
+  /**
+   * Fallback for photos with no GPS (screenshots, EXIF stripped by messaging apps,
+   * or no photo at all): read the device's location and reverse-geocode it to a
+   * postcode via the same /api/geocode route. Explicit user action, so it wins over
+   * any later photo auto-fill (postcodeTouched). Degrades to manual entry with a toast.
+   */
+  function handleUseLocation() {
+    if (!('geolocation' in navigator)) {
+      toast.error("Location isn't available on this device. Please enter your postcode.")
+      return
+    }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const pc = await geocodeToPostcode(pos.coords.latitude, pos.coords.longitude)
+        if (pc) {
+          setPostcode(pc)
+          setPostcodeTouched(true)
+          setAutofillSource('location')
+          setErrors((e) => ({ ...e, postcode: undefined }))
+        } else {
+          toast.error("We couldn't find a German postcode for your location. Please enter it manually.")
+        }
+        setLocating(false)
+      },
+      (err) => {
+        toast.error(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied. Please enter your postcode manually.'
+            : "We couldn't get your location. Please enter your postcode manually.",
+        )
+        setLocating(false)
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
+    )
   }
 
   function handleRemovePhoto() {
@@ -124,18 +253,23 @@ export function ScanForm({
     setErrors({})
 
     setSaving(true)
-    const scanId = scan?.id ?? crypto.randomUUID()
     try {
       let photoPath = scan?.photo_path ?? null
 
       if (file) {
-        const optimized = await downscaleImage(file)
-        const path = scanPhotoPath(userId, scanId)
-        const { error: uploadError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .upload(path, optimized, { upsert: true, contentType: optimized.type })
-        if (uploadError) throw uploadError
-        photoPath = path
+        // Reuse the upload the AI-prefill step already made for this exact file;
+        // otherwise upload now (e.g. classification was skipped or failed).
+        if (uploadedRef.current?.file === file) {
+          photoPath = uploadedRef.current.path
+        } else {
+          const optimized = await downscaleImage(file)
+          const path = scanPhotoPath(userId, scanId)
+          const { error: uploadError } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .upload(path, optimized, { upsert: true, contentType: optimized.type })
+          if (uploadError) throw uploadError
+          photoPath = path
+        }
       } else if (removePhoto && scan?.photo_path) {
         // Delete the stored object; the row's photo_path (and photo-derived GPS) clears below.
         await supabase.storage.from(STORAGE_BUCKET).remove([scan.photo_path])
@@ -222,9 +356,19 @@ export function ScanForm({
           Photo <span className="font-normal text-muted-foreground">(optional)</span>
         </Label>
         <PhotoPicker initialUrl={photoUrl} onSelect={handlePhoto} onRemove={handleRemovePhoto} />
-        <p className="text-xs text-muted-foreground">
-          No photo handy? You can skip this and just answer the questions below.
-        </p>
+        {classifying ? (
+          <p className="inline-flex items-center gap-1 text-xs text-accent" role="status">
+            <Loader2 className="h-3 w-3 animate-spin" /> Reading your space…
+          </p>
+        ) : prefilled ? (
+          <p className="inline-flex items-center gap-1 text-xs text-accent">
+            <Sparkles className="h-3 w-3" /> We filled in what we could see — please check and edit below.
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            No photo handy? You can skip this and just answer the questions below.
+          </p>
+        )}
         {errors.photo && <p className="text-sm text-destructive">{errors.photo}</p>}
       </div>
 
@@ -239,15 +383,40 @@ export function ScanForm({
           onChange={(e) => {
             setPostcode(e.target.value.replace(/\D/g, '').slice(0, 5))
             setPostcodeTouched(true)
-            setAutofilled(false)
+            setAutofillSource(null)
           }}
           aria-invalid={!!errors.postcode}
         />
-        {autofilled && !errors.postcode && (
-          <p className="inline-flex items-center gap-1 text-xs text-accent">
-            <MapPin className="h-3 w-3" /> Filled from your photo&apos;s location — edit if needed
-          </p>
-        )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {!postcode && (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-auto p-0 text-xs"
+              onClick={handleUseLocation}
+              disabled={locating}
+            >
+              {locating ? (
+                <>
+                  <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Finding your location…
+                </>
+              ) : (
+                <>
+                  <MapPin className="mr-1 h-3 w-3" /> Use my location
+                </>
+              )}
+            </Button>
+          )}
+          {autofillSource && !errors.postcode && (
+            <span className="text-xs text-accent">
+              {autofillSource === 'photo'
+                ? "Filled from your photo's location"
+                : 'Filled from your current location'}{' '}
+              — edit if needed
+            </span>
+          )}
+        </div>
         {errors.postcode && <p className="text-sm text-destructive">{errors.postcode}</p>}
       </div>
 
@@ -326,7 +495,7 @@ export function ScanForm({
         {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
       </div>
 
-      <Button type="submit" className="w-full" disabled={saving}>
+      <Button type="submit" className="w-full" disabled={saving || classifying}>
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : isEdit ? 'Save changes' : 'Save space'}
       </Button>
     </form>
