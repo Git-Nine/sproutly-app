@@ -355,3 +355,18 @@ The post-login landing was a static welcome screen at `/` ("Your garden. Less wo
 - **DB fix:** migration `20260624110000_proj3_fix_short_code_trigger_execute.sql` — redefine `set_scan_short_code()` as **SECURITY DEFINER** so its nested helper call runs as the owner (which keeps EXECUTE). `gen_scan_short_code()` stays revoked from anon/authenticated. Safe: `search_path=''` pinned, all refs schema-qualified, no dynamic SQL or user input. **Applied to production via dashboard SQL Editor (2026-06-24).**
 - **App:** `scan-form.tsx` save `catch` now logs the full Supabase error (`[scan save] failed:`) and surfaces its real `.message` in the toast instead of the generic fallback — Supabase errors are plain objects (not `Error`), so the cause was previously swallowed. This is what exposed the bug.
 - **Lesson:** "triggers ignore EXECUTE grants" only covers the trigger function itself, not functions it calls. Any trigger fn that calls a revoked helper must be SECURITY DEFINER (or inline the call).
+
+## Post-Deploy Enhancement — AI scan-vision prefill, UI wiring (2026-07-02)
+
+Realises the PRD's **Scan AI swap-in point** (*"EXIF + manual form → vision model populates the same fields"*). The backend seam already existed — `src/app/api/classify-vision/route.ts` (auth-gated, namespace-checked, mints a 120s signed URL, hands it to the n8n scan-vision workflow, degrades gracefully) plus its 14-test route suite, and the workflow itself (`docs/n8n-scan-vision-workflow.md` + `docs/n8n/scan-vision.workflow.json`). This change **wires it into the form**, which previously only called `/api/geocode` + `/api/enrich`.
+
+**What changed (`src/components/scans/scan-form.tsx`):**
+- **Stable `scanId`** lifted to component state (`useState(() => scan?.id ?? crypto.randomUUID())`) so the AI-prefill upload and the eventual save target the **same** storage path — no double upload.
+- **On photo pick** (`handlePhoto` → new `classifyPhoto`): downscale + upload the photo to its final path, then `POST /api/classify-vision` with `{ photo_path, postcode?, scan_draft_id }`. On `status: 'ok'` with fields, prefill sun / surface / space_type / area and clear their errors; on any fallback (`low_confidence` / `rejected`) or failure, leave the fields blank. Fully silent on error — never blocks the user.
+- **`handleSave`** reuses the already-uploaded file (tracked via `uploadedRef`) instead of re-uploading identical bytes; falls back to uploading if classification was skipped/failed.
+- **UI:** a "Reading your space…" spinner while classifying, a "We filled in what we could see — please check and edit below" hint after a confident prefill, and the Save button disabled during classification. The **skip path** (no photo) never calls n8n — the manual form is unchanged.
+
+**Human-in-the-loop:** the confirmation screen is the edit — the workflow writes nothing to the DB; the user-confirmed values persist through the normal scan insert.
+
+- **Tests:** co-located `scan-form.test.tsx` (2 tests) — asserts a picked photo triggers `/api/classify-vision` with a `photo_path` in the user's namespace and prefills the area field + shows the hint on `ok`; and that a fallback read leaves fields blank with no hint. Full suite **192/192 green**, `tsc` + `npm run lint` clean.
+- **Status:** app code complete and tested. **Not yet live** — requires the ops steps in `docs/n8n-scan-vision-workflow.md`: stand up the n8n instance + import the workflow + create the Anthropic / Header-Auth credentials, and set `N8N_CLASSIFY_WEBHOOK_URL` + `N8N_CLASSIFY_SECRET` in Vercel. Until those env vars are set, the route returns its graceful fallback and the form behaves exactly as before (manual entry).
