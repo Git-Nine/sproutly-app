@@ -5,30 +5,29 @@ import { toast } from 'sonner'
 import { Loader2, Upload, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { validateAvatarFile } from '@/lib/profile'
+import { removeAvatar, uploadAvatar } from '@/lib/profile-client'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 
-const BUCKET = 'photos'
-
+/**
+ * Sole owner of `users.avatar_path`: uploads/removals persist immediately via
+ * src/lib/profile-client.ts (atomic with storage, survives an abandoned form).
+ * The surrounding profile form saves the other fields and never touches the
+ * avatar column.
+ */
 export function AvatarUploader({
   userId,
   initials,
   initialUrl,
-  onPathChange,
 }: {
   userId: string
   initials: string
   initialUrl: string | null
-  /** Reports the stored object path (or null when removed) so the parent can persist it on save. */
-  onPathChange: (path: string | null) => void
 }) {
   const supabase = createClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<string | null>(initialUrl)
   const [busy, setBusy] = useState(false)
-
-  // Fixed per-user path → at most one avatar file per user (no orphan pile-up).
-  const path = `${userId}/avatar`
 
   async function handleFile(file: File) {
     const validationError = validateAvatarFile(file)
@@ -38,22 +37,9 @@ export function AvatarUploader({
     }
     setBusy(true)
     try {
-      const { error: uploadError } = await supabase.storage
-        .from(BUCKET)
-        .upload(path, file, { upsert: true, contentType: file.type })
-      if (uploadError) throw uploadError
-
-      // Persist the path immediately (atomic with the upload) so the row never
-      // points at a missing object and the change survives an abandoned form (BUG-2).
-      const { error: dbError } = await supabase.from('users').update({ avatar_path: path }).eq('id', userId)
-      if (dbError) throw dbError
-
-      const { data, error: urlError } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600)
-      if (urlError) throw urlError
-
+      const { signedUrl } = await uploadAvatar(supabase, userId, file)
       // cache-bust so the overwritten image refreshes
-      setPreview(`${data.signedUrl}&t=${file.lastModified}`)
-      onPathChange(path)
+      setPreview(`${signedUrl}&t=${file.lastModified}`)
       toast.success('Picture updated.')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed. Please try again.')
@@ -66,13 +52,8 @@ export function AvatarUploader({
   async function handleRemove() {
     setBusy(true)
     try {
-      // Clear the path first (the row is what the app reads), then drop the file —
-      // so a partial failure never leaves the row pointing at a missing object.
-      const { error: dbError } = await supabase.from('users').update({ avatar_path: null }).eq('id', userId)
-      if (dbError) throw dbError
-      await supabase.storage.from(BUCKET).remove([path])
+      await removeAvatar(supabase, userId)
       setPreview(null)
-      onPathChange(null)
       toast.success('Picture removed.')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not remove the picture.')

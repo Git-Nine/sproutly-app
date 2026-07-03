@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { type Plant } from '@/lib/plants'
+import { deletePlantWithReassign } from '@/lib/plants-client'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -59,13 +60,10 @@ export function DeletePlantDialog({
     if (!replacement) return
     setDeleting(true)
     try {
-      // PROJ-6: re-point any plans using this plant to the replacement, then hard-delete
-      // — atomically, admin-gated, in one trusted DB function.
-      const { error } = await supabase.rpc('reassign_and_delete_plant', {
-        target_plant_id: plant.id,
-        replacement_plant_id: replacement.id,
+      await deletePlantWithReassign(supabase, {
+        targetPlantId: plant.id,
+        replacementPlantId: replacement.id,
       })
-      if (error) throw error
       toast.success(`Deleted “${plant.common_name}.”`)
       onOpenChange(false)
       setReplacementId('')

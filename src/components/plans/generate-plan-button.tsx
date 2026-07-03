@@ -5,9 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Loader2, Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { PLANTS_TABLE, type Plant, type MaintenanceLevel } from '@/lib/plants'
-import { PLANS_TABLE, PLAN_PLANTS_TABLE } from '@/lib/plans'
-import { generatePlan } from '@/lib/plan-engine'
+import { persistGeneratedPlan } from '@/lib/plans-client'
 import type { Scan, ScanEnrichment } from '@/lib/scans'
 import { Button } from '@/components/ui/button'
 import {
@@ -56,57 +54,7 @@ export function GeneratePlanButton({
   async function handleGenerate() {
     setBusy(true)
     try {
-      const [{ data: catalogue, error: catErr }, { data: profile }] = await Promise.all([
-        supabase.from(PLANTS_TABLE).select('*'),
-        supabase
-          .from('users')
-          .select('maintenance_preference')
-          .eq('id', userId)
-          .maybeSingle<{ maintenance_preference: MaintenanceLevel | null }>(),
-      ])
-      if (catErr) throw catErr
-
-      const plan = generatePlan({
-        scan,
-        enrichment,
-        catalogue: (catalogue ?? []) as Plant[],
-        maintenancePreference: profile?.maintenance_preference ?? null,
-      })
-
-      const planId = crypto.randomUUID()
-
-      // One plan per scan: replace any existing plan (cascade clears its lines).
-      const { error: delErr } = await supabase.from(PLANS_TABLE).delete().eq('scan_id', scan.id)
-      if (delErr) throw delErr
-
-      const { error: planErr } = await supabase.from(PLANS_TABLE).insert({
-        id: planId,
-        scan_id: scan.id,
-        user_id: userId,
-        snapshot_sun: plan.snapshot.sun,
-        snapshot_area_sqm: plan.snapshot.area_sqm,
-        snapshot_surface: plan.snapshot.surface,
-        snapshot_space_type: plan.snapshot.space_type,
-        snapshot_soil: plan.snapshot.soil,
-        snapshot_zone: plan.snapshot.zone,
-        snapshot_maintenance: plan.snapshot.maintenance,
-        zone_unconfirmed: plan.zoneUnconfirmed,
-        extra_match_count: plan.extraMatchCount,
-      })
-      if (planErr) throw planErr
-
-      if (plan.lines.length > 0) {
-        const rows = plan.lines.map((l) => ({
-          plan_id: planId,
-          plant_id: l.plant.id,
-          quantity: l.quantity,
-          sort_order: l.sortOrder,
-          soil_flag: l.soilFlag,
-        }))
-        const { error: linesErr } = await supabase.from(PLAN_PLANTS_TABLE).insert(rows)
-        if (linesErr) throw linesErr
-      }
-
+      await persistGeneratedPlan(supabase, { scan, enrichment, userId })
       router.push(`/scans/${scan.short_code}/plan`)
       router.refresh()
     } catch (err) {

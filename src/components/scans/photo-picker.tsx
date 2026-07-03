@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Camera, ImageIcon, Loader2, RefreshCw, ImageOff, Trash2 } from 'lucide-react'
+import { Camera, ImageIcon, Leaf, Loader2, RefreshCw, ImageOff, Trash2 } from 'lucide-react'
 import { readPhotoExif, isHeic, type PhotoExif } from '@/lib/image'
 import { validatePhotoFile, PHOTO_ACCEPT_ATTR } from '@/lib/scans'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ export function PhotoPicker({
   initialUrl,
   onSelect,
   onRemove,
+  variant = 'default',
 }: {
   /** Existing photo (signed URL) when editing; null for a new scan. */
   initialUrl: string | null
@@ -18,6 +19,12 @@ export function PhotoPicker({
   onSelect: (file: File | null, exif: PhotoExif | null) => void
   /** Clears the photo: drops a fresh pick and marks an existing saved photo for removal. */
   onRemove?: () => void
+  /**
+   * `hero` renders the large "Point at your outdoor space" dropzone for the first
+   * step of the scan wizard (empty state only). `default` is the compact
+   * preview + Replace/Remove editor used on the review and edit screens.
+   */
+  variant?: 'default' | 'hero'
 }) {
   const cameraRef = useRef<HTMLInputElement>(null)
   const libraryRef = useRef<HTMLInputElement>(null)
@@ -62,8 +69,8 @@ export function PhotoPicker({
     onRemove?.()
   }
 
-  return (
-    <div className="space-y-3">
+  const hiddenInputs = (
+    <>
       <input
         ref={cameraRef}
         type="file"
@@ -87,6 +94,42 @@ export function PhotoPicker({
           e.target.value = ''
         }}
       />
+    </>
+  )
+
+  // Wizard step 1: the big "Point at your outdoor space" dropzone. Only ever shown
+  // empty — once a photo is picked the wizard advances past this step.
+  if (variant === 'hero') {
+    return (
+      <div>
+        {hiddenInputs}
+        <button
+          type="button"
+          disabled={reading}
+          onClick={() => libraryRef.current?.click()}
+          className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed border-border bg-card px-6 text-center transition-colors hover:border-accent hover:bg-accent/5 disabled:opacity-70"
+        >
+          {reading ? (
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          ) : (
+            <>
+              <span className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+                <Leaf className="h-9 w-9" />
+              </span>
+              <span className="space-y-1">
+                <span className="block font-semibold text-foreground">Point at your outdoor space</span>
+                <span className="block text-sm text-muted-foreground">Tap to take or upload a photo</span>
+              </span>
+            </>
+          )}
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {hiddenInputs}
 
       <div
         onDragOver={(e) => {

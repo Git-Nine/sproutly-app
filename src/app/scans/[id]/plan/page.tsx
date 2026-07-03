@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
 import { ProfileLink } from '@/components/brand/profile-link'
 import { PlanEditor } from '@/components/plans/plan-editor'
+import { PlanBuilder } from '@/components/plans/plan-builder'
+import { PlanConditions } from '@/components/plans/plan-conditions'
 import { scanTitle, type Scan, type ScanEnrichment } from '@/lib/scans'
 import { PLANTS_TABLE, type Plant, type MaintenanceLevel } from '@/lib/plants'
 import {
@@ -30,17 +32,39 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   const { data: scan } = await supabase.from('scans').select('*').eq('short_code', id).maybeSingle<Scan>()
   if (!scan) notFound()
 
-  // No plan yet (or tables not migrated) → send the user to the scan to generate one.
-  const { data: plan } = await supabase
-    .from(PLANS_TABLE)
-    .select('*')
-    .eq('scan_id', scan.id)
-    .maybeSingle<Plan>()
-  if (!plan) redirect(`/scans/${id}`)
-
-  const [linesResult, enrichmentResult, profileResult, catalogueResult] = await Promise.all([
-    supabase.from(PLAN_PLANTS_TABLE).select('*, plants(*)').eq('plan_id', plan.id).order('sort_order'),
+  const [{ data: plan }, enrichmentResult] = await Promise.all([
+    supabase.from(PLANS_TABLE).select('*').eq('scan_id', scan.id).maybeSingle<Plan>(),
     supabase.from('scan_enrichment').select('*').eq('scan_id', scan.id).maybeSingle<ScanEnrichment>(),
+  ])
+  const enrichment = enrichmentResult.data ?? null
+
+  // No plan yet — the user came straight from the scan wizard. Auto-build it in
+  // place (waiting briefly for conditions) rather than bouncing back to the scan.
+  if (!plan) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-4">
+          <Link
+            href={`/scans/${id}`}
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" /> Space
+          </Link>
+          <Logo />
+          <ProfileLink />
+        </header>
+        <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">
+          <p className="font-mono text-[11px] uppercase tracking-wider text-label">{scanTitle(scan)}</p>
+          <h1 className="mt-1 text-3xl">Your planting plan</h1>
+          <PlanConditions scan={scan} enrichment={enrichment} className="mt-4" />
+          <PlanBuilder scan={scan} initialEnrichment={enrichment} userId={user.id} />
+        </main>
+      </div>
+    )
+  }
+
+  const [linesResult, profileResult, catalogueResult] = await Promise.all([
+    supabase.from(PLAN_PLANTS_TABLE).select('*, plants(*)').eq('plan_id', plan.id).order('sort_order'),
     supabase
       .from('users')
       .select('maintenance_preference')
@@ -50,7 +74,6 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   ])
 
   const lines = mergeDuplicateLines((linesResult.data ?? []) as PlanPlantWithPlant[])
-  const enrichment = enrichmentResult.data ?? null
   const maintenancePreference = profileResult.data?.maintenance_preference ?? null
   const catalogue = (catalogueResult.data ?? []) as Plant[]
 

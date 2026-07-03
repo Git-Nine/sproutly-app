@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { SUN_OPTIONS, sunLabel, type SunExposure } from '@/lib/scans'
-import { MAINTENANCE_OPTIONS } from '@/lib/profile'
+import { MAINTENANCE_OPTIONS, type MaintenanceLevel } from '@/lib/profile'
+import { SOIL_OPTIONS, type Soil } from '@/lib/soil'
+import { optionValues } from '@/lib/utils'
 
 /**
  * Plant catalogue option sets + validation for PROJ-5 (Plant Database & Admin).
@@ -14,20 +16,8 @@ import { MAINTENANCE_OPTIONS } from '@/lib/profile'
  * migration creates the public.plants table (same staged flow as PROJ-2/PROJ-3).
  */
 
-export { SUN_OPTIONS, sunLabel, MAINTENANCE_OPTIONS }
-export type { SunExposure }
-
-/** PROJ-4's five soil buckets — the exact set the scan enrichment produces. */
-export const SOIL_OPTIONS = [
-  { value: 'sand', label: 'Sand' },
-  { value: 'loam', label: 'Loam' },
-  { value: 'clay', label: 'Clay' },
-  { value: 'silt', label: 'Silt' },
-  { value: 'peat', label: 'Peat' },
-] as const
-
-export type Soil = (typeof SOIL_OPTIONS)[number]['value']
-export type MaintenanceLevel = (typeof MAINTENANCE_OPTIONS)[number]['value']
+export { SUN_OPTIONS, sunLabel, MAINTENANCE_OPTIONS, SOIL_OPTIONS }
+export type { SunExposure, Soil, MaintenanceLevel }
 
 /**
  * Structural planting layers (PROJ-6). Drives the ~60/30/10 layered plan
@@ -91,10 +81,10 @@ export const plantSchema = z.object({
     .min(1, 'Enter the Latin name')
     .max(LATIN_NAME_MAX, `Keep it under ${LATIN_NAME_MAX} characters`),
   sun_tolerance: z
-    .array(z.enum(['full', 'partial', 'shade']))
+    .array(z.enum(optionValues(SUN_OPTIONS)))
     .min(1, 'Pick at least one sun condition'),
   soil_compatibility: z
-    .array(z.enum(['sand', 'loam', 'clay', 'silt', 'peat']))
+    .array(z.enum(optionValues(SOIL_OPTIONS)))
     .min(1, 'Pick at least one soil type'),
   min_hardiness_zone: z
     .number({ message: 'Choose the minimum hardiness zone' })
@@ -111,10 +101,10 @@ export const plantSchema = z.object({
     .int('Use a whole number of cm')
     .min(SIZE_MIN_CM, `Spread must be at least ${SIZE_MIN_CM} cm`)
     .max(SIZE_MAX_CM, `Spread must be ${SIZE_MAX_CM} cm or less`),
-  maintenance_level: z.enum(['low', 'medium', 'high'], {
+  maintenance_level: z.enum(optionValues(MAINTENANCE_OPTIONS), {
     message: 'Choose a maintenance level',
   }),
-  plant_type: z.enum(['groundcover', 'perennial', 'shrub', 'tree'], {
+  plant_type: z.enum(optionValues(PLANT_TYPE_OPTIONS), {
     message: 'Choose the plant type',
   }),
   native: z.boolean(),

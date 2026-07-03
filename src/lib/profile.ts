@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { optionValues } from '@/lib/utils'
 
 /** Profile option sets — mirror the check constraints on public.users (PROJ-1). */
 export const MAINTENANCE_OPTIONS = [
@@ -12,6 +13,11 @@ export const EXPERIENCE_OPTIONS = [
   { value: 'intermediate', label: 'Intermediate' },
   { value: 'expert', label: 'Expert' },
 ] as const
+
+export type MaintenanceLevel = (typeof MAINTENANCE_OPTIONS)[number]['value']
+export type ExperienceLevel = (typeof EXPERIENCE_OPTIONS)[number]['value']
+
+export const USERS_TABLE = 'users'
 
 /** Sentinel used by the Select "no preference" item (Radix forbids empty string values). */
 export const UNSET = '__unset__'
@@ -38,8 +44,8 @@ export const profileSchema = z.object({
     .string()
     .trim()
     .max(DISPLAY_NAME_MAX, `Keep it under ${DISPLAY_NAME_MAX} characters`),
-  maintenance_preference: z.enum(['low', 'medium', 'high']).nullable(),
-  experience_level: z.enum(['beginner', 'intermediate', 'expert']).nullable(),
+  maintenance_preference: z.enum(optionValues(MAINTENANCE_OPTIONS)).nullable(),
+  experience_level: z.enum(optionValues(EXPERIENCE_OPTIONS)).nullable(),
 })
 export type ProfileValues = z.infer<typeof profileSchema>
 
@@ -50,8 +56,8 @@ export type UserProfile = {
   role: 'user' | 'admin'
   display_name: string | null
   avatar_path: string | null
-  maintenance_preference: 'low' | 'medium' | 'high' | null
-  experience_level: 'beginner' | 'intermediate' | 'expert' | null
+  maintenance_preference: MaintenanceLevel | null
+  experience_level: ExperienceLevel | null
 }
 
 /** Initials shown when there is no avatar / display name. */

@@ -3,7 +3,6 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
-import { ProfileLink } from '@/components/brand/profile-link'
 import { ScanForm } from '@/components/scans/scan-form'
 
 export default async function NewScanPage() {
@@ -20,15 +19,23 @@ export default async function NewScanPage() {
         <Link href="/scans" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
-        <Logo />
-        <ProfileLink />
+        <Logo href={null} />
+        <span className="text-sm tabular-nums text-muted-foreground">1/4</span>
       </header>
 
-      <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">
-        <h1 className="mb-2 text-3xl">Scan your space</h1>
-        <p className="mb-6 text-muted-foreground">
-          One photo and a few details — we&apos;ll use them to plan what grows here.
-        </p>
+      {/* Journey progress: Scan → Plan → Order → Grow (Scan is active). */}
+      <div className="mx-auto w-full max-w-md border-b border-border px-4 pb-4">
+        <div className="flex justify-center gap-2" aria-hidden>
+          {[0, 1, 2, 3].map((i) => (
+            <span
+              key={i}
+              className={`h-2 w-2 rounded-full ${i === 0 ? 'bg-primary' : 'bg-border'}`}
+            />
+          ))}
+        </div>
+      </div>
+
+      <main className="mx-auto w-full max-w-md px-4 pb-16 pt-6">
         <ScanForm userId={user.id} scan={null} photoUrl={null} />
       </main>
     </div>

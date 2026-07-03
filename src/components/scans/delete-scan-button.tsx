@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Loader2, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { STORAGE_BUCKET } from '@/lib/scans'
+import { deleteScan } from '@/lib/scans-client'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -33,11 +33,7 @@ export function DeleteScanButton({
   async function handleDelete() {
     setDeleting(true)
     try {
-      if (photoPath) {
-        await supabase.storage.from(STORAGE_BUCKET).remove([photoPath])
-      }
-      const { error } = await supabase.from('scans').delete().eq('id', scanId)
-      if (error) throw error
+      await deleteScan(supabase, { scanId, photoPath })
       toast.success('Space deleted.')
       router.push('/scans')
       router.refresh()

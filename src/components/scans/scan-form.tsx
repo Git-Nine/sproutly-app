@@ -1,11 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Loader2, MapPin } from 'lucide-react'
+import {
+  ChevronDown,
+  Layers,
+  Loader2,
+  MapPin,
+  Ruler,
+  Sparkles,
+  Sun,
+  Tag,
+  Trees,
+} from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { downscaleImage, type PhotoExif } from '@/lib/image'
+import { isHeic, type PhotoExif } from '@/lib/image'
 import {
   SUN_OPTIONS,
   SURFACE_OPTIONS,
@@ -13,12 +23,20 @@ import {
   NAME_MAX,
   AREA_MIN,
   AREA_MAX,
-  STORAGE_BUCKET,
-  scanPhotoPath,
   scanSchema,
   type Scan,
 } from '@/lib/scans'
+import {
+  geocodeToPostcode,
+  saveScan,
+  shouldTriggerEnrichment,
+  triggerEnrichment,
+} from '@/lib/scans-client'
+import { useLocatePostcode } from '@/hooks/use-locate-postcode'
+import { useVisionPrefill } from '@/hooks/use-vision-prefill'
 import { PhotoPicker } from './photo-picker'
+import { FieldRow, INLINE_INPUT, INLINE_TRIGGER } from './scan-field-row'
+import { PhotoFrame, ReadingStep, UploadStep } from './scan-wizard-steps'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -31,6 +49,22 @@ import {
 } from '@/components/ui/select'
 
 type Errors = Partial<Record<'photo' | 'name' | 'postcode' | 'sun_exposure' | 'surface' | 'space_type' | 'area_sqm', string>>
+
+/** Where an auto-filled postcode came from — drives the "edit if needed" hint. */
+type AutofillSource = 'photo' | 'location' | null
+
+/**
+ * The scan wizard steps, mirroring the prototype flow:
+ *  - `upload`  → "Scan your space" — the big photo dropzone (new scans only).
+ *  - `reading` → "Reading your space…" — while the AI vision prefill runs.
+ *  - `review`  → "Here's what we see" — editable conditions + save.
+ * Edit mode skips straight to `review`.
+ *
+ * This component owns the wizard state and form fields; the I/O lives in
+ * src/lib/scans-client.ts (upload/classify/save/enrich) and the two hooks
+ * (vision prefill, use-my-location), the step screens in scan-wizard-steps.tsx.
+ */
+type Step = 'upload' | 'reading' | 'review'
 
 export function ScanForm({
   userId,
@@ -46,13 +80,24 @@ export function ScanForm({
   const supabase = createClient()
   const router = useRouter()
 
+  // Stable id for this scan across classify + save, so the AI prefill uploads the
+  // photo to the SAME storage path the save will persist (no double upload).
+  const [scanId] = useState(() => scan?.id ?? crypto.randomUUID())
+
+  const isEdit = scan !== null
+
+  const [step, setStep] = useState<Step>(isEdit ? 'review' : 'upload')
   const [file, setFile] = useState<File | null>(null)
   const [exif, setExif] = useState<PhotoExif | null>(null)
   const [removePhoto, setRemovePhoto] = useState(false)
+  // Photo shown on the reading + review steps. Starts as the existing signed URL
+  // (edit mode); a fresh pick swaps in a local object URL via the effect below.
+  const [previewUrl, setPreviewUrl] = useState<string | null>(photoUrl)
+  const [showPhotoEditor, setShowPhotoEditor] = useState(false)
   const [name, setName] = useState(scan?.name ?? '')
   const [postcode, setPostcode] = useState(scan?.postcode ?? '')
   const [postcodeTouched, setPostcodeTouched] = useState(Boolean(scan?.postcode))
-  const [autofilled, setAutofilled] = useState(false)
+  const [autofillSource, setAutofillSource] = useState<AutofillSource>(null)
   const [sun, setSun] = useState<string>(scan?.sun_exposure ?? '')
   const [surface, setSurface] = useState<string>(scan?.surface ?? '')
   const [spaceType, setSpaceType] = useState<string>(scan?.space_type ?? '')
@@ -60,39 +105,75 @@ export function ScanForm({
   const [errors, setErrors] = useState<Errors>({})
   const [saving, setSaving] = useState(false)
 
-  const isEdit = scan !== null
+  const prefill = useVisionPrefill({ supabase, userId, scanId })
+  const locator = useLocatePostcode((pc) => {
+    setPostcode(pc)
+    setPostcodeTouched(true)
+    setAutofillSource('location')
+    setErrors((e) => ({ ...e, postcode: undefined }))
+  })
+
+  // Keep a local preview for the picked file (reading + review steps). HEIC can't be
+  // rendered by the browser, so it falls back to the "no preview" placeholder.
+  useEffect(() => {
+    if (!file) return
+    if (isHeic(file)) {
+      setPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(file)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
 
   async function handlePhoto(picked: File | null, pickedExif: PhotoExif | null) {
     setFile(picked)
     setExif(pickedExif)
     setRemovePhoto(false) // picking a photo overrides a pending removal
     setErrors((e) => ({ ...e, photo: undefined }))
+    prefill.reset() // a new pick invalidates any earlier upload + hint
+
+    if (!picked) return
+
+    // Advance to the full-screen "Reading your space…" step while GPS + AI prefill
+    // run — new scans only; in edit mode the review form stays put and shows an
+    // inline "Reading…" hint instead.
+    if (!isEdit) setStep('reading')
 
     // Auto-fill postcode from the photo's GPS — only if the user hasn't typed one.
     if (pickedExif?.lat != null && pickedExif?.lng != null && !postcodeTouched) {
-      try {
-        const res = await fetch('/api/geocode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lat: pickedExif.lat, lng: pickedExif.lng }),
-        })
-        if (res.ok) {
-          const data = (await res.json()) as { postcode?: string | null }
-          if (data.postcode && !postcodeTouched) {
-            setPostcode(data.postcode)
-            setAutofilled(true)
-          }
-        }
-      } catch {
-        // Silent fallback — the user just enters the postcode manually.
+      const pc = await geocodeToPostcode(pickedExif.lat, pickedExif.lng)
+      if (pc && !postcodeTouched) {
+        setPostcode(pc)
+        setAutofillSource('photo')
       }
     }
+
+    // AI prefill (PROJ-3 swap-in point): let the vision workflow read the photo and
+    // pre-fill the conditions. The user still reviews and edits everything before
+    // saving. Either way we land on the review step afterwards.
+    await prefill.classify(picked, postcode, (fields) => {
+      setSun(fields.sun_exposure)
+      setSurface(fields.surface)
+      setSpaceType(fields.space_type)
+      setArea(String(fields.area_sqm))
+      setErrors((e) => ({
+        ...e,
+        sun_exposure: undefined,
+        surface: undefined,
+        space_type: undefined,
+        area_sqm: undefined,
+      }))
+    })
+    if (!isEdit) setStep('review')
   }
 
   function handleRemovePhoto() {
     setFile(null)
     setExif(null)
     setRemovePhoto(true)
+    setPreviewUrl(null)
+    prefill.reset()
     setErrors((e) => ({ ...e, photo: undefined }))
   }
 
@@ -108,15 +189,13 @@ export function ScanForm({
       area_sqm: area === '' ? NaN : Number(area),
     })
 
-    const nextErrors: Errors = {}
+    // The photo is optional — a scan can be created from the conditions answers alone.
     if (!parsed.success) {
+      const nextErrors: Errors = {}
       const fieldErrors = parsed.error.flatten().fieldErrors
       for (const [key, msgs] of Object.entries(fieldErrors)) {
         if (msgs?.[0]) nextErrors[key as keyof Errors] = msgs[0]
       }
-    }
-    // The photo is optional — a scan can be created from the conditions answers alone.
-    if (Object.keys(nextErrors).length > 0 || !parsed.success) {
       setErrors(nextErrors)
       toast.error('Please fix the highlighted fields.')
       return
@@ -124,81 +203,24 @@ export function ScanForm({
     setErrors({})
 
     setSaving(true)
-    const scanId = scan?.id ?? crypto.randomUUID()
     try {
-      let photoPath = scan?.photo_path ?? null
-
-      if (file) {
-        const optimized = await downscaleImage(file)
-        const path = scanPhotoPath(userId, scanId)
-        const { error: uploadError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .upload(path, optimized, { upsert: true, contentType: optimized.type })
-        if (uploadError) throw uploadError
-        photoPath = path
-      } else if (removePhoto && scan?.photo_path) {
-        // Delete the stored object; the row's photo_path (and photo-derived GPS) clears below.
-        await supabase.storage.from(STORAGE_BUCKET).remove([scan.photo_path])
-        photoPath = null
-      }
-
-      const fields = {
-        name: parsed.data.name.trim() || null,
-        postcode: parsed.data.postcode,
-        sun_exposure: parsed.data.sun_exposure,
-        surface: parsed.data.surface,
-        space_type: parsed.data.space_type,
-        area_sqm: parsed.data.area_sqm,
-        photo_path: photoPath,
-      }
-
-      // The short_code (set DB-side on insert) is what the URL uses, not the uuid.
-      let targetCode = scan?.short_code ?? ''
-      if (isEdit) {
-        // Refresh GPS/date with a new photo's EXIF; clear it when the photo is removed
-        // (the coordinates were photo-derived); otherwise leave it untouched.
-        const geo = file
-          ? { lat: exif?.lat ?? null, lng: exif?.lng ?? null, taken_at: exif?.takenAt ?? null }
-          : removePhoto
-            ? { lat: null, lng: null, taken_at: null }
-            : {}
-        const { error: updateError } = await supabase
-          .from('scans')
-          .update({ ...fields, ...geo })
-          .eq('id', scanId)
-        if (updateError) throw updateError
-      } else {
-        const { data: inserted, error: insertError } = await supabase
-          .from('scans')
-          .insert({
-            id: scanId,
-            user_id: userId,
-            ...fields,
-            lat: exif?.lat ?? null,
-            lng: exif?.lng ?? null,
-            taken_at: exif?.takenAt ?? null,
-          })
-          .select('short_code')
-          .single<{ short_code: string }>()
-        if (insertError) throw insertError
-        targetCode = inserted.short_code
-      }
+      const shortCode = await saveScan(supabase, {
+        scanId,
+        userId,
+        existing: scan,
+        values: parsed.data,
+        photo: { file, alreadyUploadedPath: prefill.uploadedPathFor(file), remove: removePhoto },
+        exif,
+      })
 
       toast.success('Space saved.')
 
       // Trigger environmental enrichment if this is a new scan or the location changed.
-      const locationChanged = !isEdit || postcode !== (scan?.postcode ?? '') || file !== null
-      if (locationChanged) {
-        fetch('/api/enrich', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ scan_id: scanId }),
-        }).catch(() => {
-          // Fire-and-forget — enrichment failure never blocks the save flow.
-        })
+      if (shouldTriggerEnrichment(scan, postcode, file !== null)) {
+        triggerEnrichment(scanId)
       }
 
-      router.push(`/scans/${targetCode}`)
+      router.push(`/scans/${shortCode}`)
       router.refresh()
     } catch (err) {
       // Supabase errors are plain objects (PostgrestError/StorageError), not Error
@@ -215,120 +237,198 @@ export function ScanForm({
     }
   }
 
+  if (step === 'upload') {
+    return <UploadStep onSelect={handlePhoto} onSkip={() => setStep('review')} />
+  }
+
+  if (step === 'reading') {
+    return <ReadingStep previewUrl={previewUrl} />
+  }
+
+  // ---- Step 3: review — "Here's what we see" (editable conditions + save) ----
   return (
     <form onSubmit={handleSave} className="space-y-6">
-      <div className="space-y-2">
-        <Label>
-          Photo <span className="font-normal text-muted-foreground">(optional)</span>
-        </Label>
-        <PhotoPicker initialUrl={photoUrl} onSelect={handlePhoto} onRemove={handleRemovePhoto} />
-        <p className="text-xs text-muted-foreground">
-          No photo handy? You can skip this and just answer the questions below.
-        </p>
-        {errors.photo && <p className="text-sm text-destructive">{errors.photo}</p>}
+      {!isEdit && <h1 className="text-3xl">Here&apos;s what we see</h1>}
+
+      {/* Photo: an editable picker in edit mode; a clean hero image on a fresh scan. */}
+      {isEdit ? (
+        <div className="space-y-2">
+          <Label>
+            Photo <span className="font-normal text-muted-foreground">(optional)</span>
+          </Label>
+          <PhotoPicker initialUrl={photoUrl} onSelect={handlePhoto} onRemove={handleRemovePhoto} />
+          {prefill.classifying ? (
+            <p className="inline-flex items-center gap-1 text-xs text-accent" role="status">
+              <Loader2 className="h-3 w-3 animate-spin" /> Reading your space…
+            </p>
+          ) : (
+            prefill.prefilled && <PrefilledHint />
+          )}
+        </div>
+      ) : (
+        <PhotoFrame url={previewUrl} emptyLabel="No photo added" />
+      )}
+
+      {!isEdit && prefill.prefilled && <PrefilledHint />}
+
+      <div className="space-y-3">
+        <FieldRow icon={Layers} label="Current surface" htmlFor="surface" error={errors.surface}>
+          <Select value={surface} onValueChange={(v) => { setSurface(v); setErrors((e) => ({ ...e, surface: undefined })) }}>
+            <SelectTrigger id="surface" aria-invalid={!!errors.surface} className={INLINE_TRIGGER}>
+              <SelectValue placeholder="What's there now?" />
+            </SelectTrigger>
+            <SelectContent>
+              {SURFACE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FieldRow>
+
+        <FieldRow icon={Ruler} label="Area" error={errors.area_sqm}>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-sm text-muted-foreground">approx.</span>
+            <Input
+              id="area"
+              aria-label="Approximate area (m²)"
+              type="number"
+              inputMode="numeric"
+              min={AREA_MIN}
+              max={AREA_MAX}
+              step={1}
+              placeholder="20"
+              value={area}
+              onChange={(e) => { setArea(e.target.value); setErrors((er) => ({ ...er, area_sqm: undefined })) }}
+              aria-invalid={!!errors.area_sqm}
+              className={`${INLINE_INPUT} w-20`}
+            />
+            <span className="text-sm text-muted-foreground">m²</span>
+          </div>
+        </FieldRow>
+
+        <FieldRow icon={Sun} label="Sun exposure" htmlFor="sun" error={errors.sun_exposure}>
+          <Select value={sun} onValueChange={(v) => { setSun(v); setErrors((e) => ({ ...e, sun_exposure: undefined })) }}>
+            <SelectTrigger id="sun" aria-invalid={!!errors.sun_exposure} className={INLINE_TRIGGER}>
+              <SelectValue placeholder="How much sun does it get?" />
+            </SelectTrigger>
+            <SelectContent>
+              {SUN_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FieldRow>
+
+        <FieldRow icon={Trees} label="Space type" htmlFor="space_type" error={errors.space_type}>
+          <Select value={spaceType} onValueChange={(v) => { setSpaceType(v); setErrors((e) => ({ ...e, space_type: undefined })) }}>
+            <SelectTrigger id="space_type" aria-invalid={!!errors.space_type} className={INLINE_TRIGGER}>
+              <SelectValue placeholder="What kind of space is it?" />
+            </SelectTrigger>
+            <SelectContent>
+              {SPACE_TYPE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FieldRow>
+
+        <FieldRow icon={MapPin} label="Postcode (PLZ)" htmlFor="postcode" error={errors.postcode}>
+          <Input
+            id="postcode"
+            inputMode="numeric"
+            maxLength={5}
+            placeholder="e.g. 10115"
+            value={postcode}
+            onChange={(e) => {
+              setPostcode(e.target.value.replace(/\D/g, '').slice(0, 5))
+              setPostcodeTouched(true)
+              setAutofillSource(null)
+            }}
+            aria-invalid={!!errors.postcode}
+            className={INLINE_INPUT}
+          />
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {!postcode && (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs"
+                onClick={locator.locate}
+                disabled={locator.locating}
+              >
+                {locator.locating ? (
+                  <>
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Finding your location…
+                  </>
+                ) : (
+                  <>
+                    <MapPin className="mr-1 h-3 w-3" /> Use my location
+                  </>
+                )}
+              </Button>
+            )}
+            {autofillSource && !errors.postcode && (
+              <span className="text-xs text-accent">
+                {autofillSource === 'photo'
+                  ? "Filled from your photo's location"
+                  : 'Filled from your current location'}{' '}
+                — edit if needed
+              </span>
+            )}
+          </div>
+        </FieldRow>
+
+        <FieldRow icon={Tag} label="Name (optional)" htmlFor="name" error={errors.name}>
+          <Input
+            id="name"
+            maxLength={NAME_MAX}
+            placeholder="e.g. Back garden"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-invalid={!!errors.name}
+            className={INLINE_INPUT}
+          />
+        </FieldRow>
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="postcode">Postcode (PLZ)</Label>
-        <Input
-          id="postcode"
-          inputMode="numeric"
-          maxLength={5}
-          placeholder="e.g. 10115"
-          value={postcode}
-          onChange={(e) => {
-            setPostcode(e.target.value.replace(/\D/g, '').slice(0, 5))
-            setPostcodeTouched(true)
-            setAutofilled(false)
-          }}
-          aria-invalid={!!errors.postcode}
-        />
-        {autofilled && !errors.postcode && (
-          <p className="inline-flex items-center gap-1 text-xs text-accent">
-            <MapPin className="h-3 w-3" /> Filled from your photo&apos;s location — edit if needed
-          </p>
+      <Button type="submit" className="w-full" disabled={saving || prefill.classifying}>
+        {saving ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : isEdit ? (
+          'Save changes'
+        ) : (
+          'Looks right — show me my plan'
         )}
-        {errors.postcode && <p className="text-sm text-destructive">{errors.postcode}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="sun">Sun exposure</Label>
-        <Select value={sun} onValueChange={(v) => { setSun(v); setErrors((e) => ({ ...e, sun_exposure: undefined })) }}>
-          <SelectTrigger id="sun" aria-invalid={!!errors.sun_exposure}>
-            <SelectValue placeholder="How much sun does it get?" />
-          </SelectTrigger>
-          <SelectContent>
-            {SUN_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {errors.sun_exposure && <p className="text-sm text-destructive">{errors.sun_exposure}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="surface">Current surface</Label>
-        <Select value={surface} onValueChange={(v) => { setSurface(v); setErrors((e) => ({ ...e, surface: undefined })) }}>
-          <SelectTrigger id="surface" aria-invalid={!!errors.surface}>
-            <SelectValue placeholder="What's there now?" />
-          </SelectTrigger>
-          <SelectContent>
-            {SURFACE_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {errors.surface && <p className="text-sm text-destructive">{errors.surface}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="space_type">Space type</Label>
-        <Select value={spaceType} onValueChange={(v) => { setSpaceType(v); setErrors((e) => ({ ...e, space_type: undefined })) }}>
-          <SelectTrigger id="space_type" aria-invalid={!!errors.space_type}>
-            <SelectValue placeholder="What kind of space is it?" />
-          </SelectTrigger>
-          <SelectContent>
-            {SPACE_TYPE_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {errors.space_type && <p className="text-sm text-destructive">{errors.space_type}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="area">Approximate area (m²)</Label>
-        <Input
-          id="area"
-          type="number"
-          inputMode="numeric"
-          min={AREA_MIN}
-          max={AREA_MAX}
-          step={1}
-          placeholder="e.g. 20"
-          value={area}
-          onChange={(e) => { setArea(e.target.value); setErrors((er) => ({ ...er, area_sqm: undefined })) }}
-          aria-invalid={!!errors.area_sqm}
-        />
-        {errors.area_sqm && <p className="text-sm text-destructive">{errors.area_sqm}</p>}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="name">Name (optional)</Label>
-        <Input
-          id="name"
-          maxLength={NAME_MAX}
-          placeholder="e.g. Back garden"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          aria-invalid={!!errors.name}
-        />
-        {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
-      </div>
-
-      <Button type="submit" className="w-full" disabled={saving}>
-        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : isEdit ? 'Save changes' : 'Save space'}
       </Button>
+
+      {/* Escape hatch: re-shoot / add / remove the photo if the AI read looks off. */}
+      {!isEdit && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowPhotoEditor((v) => !v)}
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            aria-expanded={showPhotoEditor}
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${showPhotoEditor ? 'rotate-180' : ''}`} />
+            Trouble reading the photo?
+          </button>
+          {showPhotoEditor && (
+            <div className="mt-3">
+              <PhotoPicker initialUrl={null} onSelect={handlePhoto} onRemove={handleRemovePhoto} />
+            </div>
+          )}
+        </div>
+      )}
     </form>
+  )
+}
+
+function PrefilledHint() {
+  return (
+    <p className="inline-flex items-center gap-1 text-xs text-accent">
+      <Sparkles className="h-3 w-3" /> We filled in what we could see — please check and edit below.
+    </p>
   )
 }
