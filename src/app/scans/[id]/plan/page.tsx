@@ -1,13 +1,14 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ImageOff, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
 import { ProfileLink } from '@/components/brand/profile-link'
+import { Button } from '@/components/ui/button'
 import { PlanEditor } from '@/components/plans/plan-editor'
 import { PlanBuilder } from '@/components/plans/plan-builder'
 import { PlanConditions } from '@/components/plans/plan-conditions'
-import { scanTitle, type Scan, type ScanEnrichment } from '@/lib/scans'
+import { scanTitle, STORAGE_BUCKET, type Scan, type ScanEnrichment } from '@/lib/scans'
 import { PLANTS_TABLE, type Plant, type MaintenanceLevel } from '@/lib/plants'
 import {
   PLANS_TABLE,
@@ -32,29 +33,25 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   const { data: scan } = await supabase.from('scans').select('*').eq('short_code', id).maybeSingle<Scan>()
   if (!scan) notFound()
 
-  const [{ data: plan }, enrichmentResult] = await Promise.all([
+  const [{ data: plan }, enrichmentResult, photoResult] = await Promise.all([
     supabase.from(PLANS_TABLE).select('*').eq('scan_id', scan.id).maybeSingle<Plan>(),
     supabase.from('scan_enrichment').select('*').eq('scan_id', scan.id).maybeSingle<ScanEnrichment>(),
+    scan.photo_path
+      ? supabase.storage.from(STORAGE_BUCKET).createSignedUrl(scan.photo_path, 3600)
+      : Promise.resolve({ data: null }),
   ])
   const enrichment = enrichmentResult.data ?? null
+  const photoUrl = photoResult.data?.signedUrl ?? null
 
   // No plan yet — the user came straight from the scan wizard. Auto-build it in
   // place (waiting briefly for conditions) rather than bouncing back to the scan.
   if (!plan) {
     return (
       <div className="min-h-screen bg-background">
-        <header className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-4">
-          <Link
-            href={`/scans/${id}`}
-            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" /> Space
-          </Link>
-          <Logo />
-          <ProfileLink />
-        </header>
+        <PlanHeader />
         <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">
-          <p className="font-mono text-[11px] uppercase tracking-wider text-label">{scanTitle(scan)}</p>
+          <SpacePhoto photoUrl={photoUrl} alt={scanTitle(scan)} editHref={`/scans/${id}`} />
+          <p className="mt-5 font-mono text-[11px] uppercase tracking-wider text-label">{scanTitle(scan)}</p>
           <h1 className="mt-1 text-3xl">Your planting plan</h1>
           <PlanConditions scan={scan} enrichment={enrichment} className="mt-4" />
           <PlanBuilder scan={scan} initialEnrichment={enrichment} userId={user.id} />
@@ -101,19 +98,11 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-4">
-        <Link
-          href={`/scans/${id}`}
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Space
-        </Link>
-        <Logo />
-        <ProfileLink />
-      </header>
+      <PlanHeader />
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-2">
-        <p className="font-mono text-[11px] uppercase tracking-wider text-label">{scanTitle(scan)}</p>
+        <SpacePhoto photoUrl={photoUrl} alt={scanTitle(scan)} editHref={`/scans/${id}`} />
+        <p className="mt-5 font-mono text-[11px] uppercase tracking-wider text-label">{scanTitle(scan)}</p>
         <h1 className="mt-1 text-3xl">Your planting plan</h1>
 
         <div className="mt-6">
@@ -128,6 +117,56 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
           />
         </div>
       </main>
+    </div>
+  )
+}
+
+/** Shared header for the plan screen: back to My Spaces, brand, profile. */
+function PlanHeader() {
+  return (
+    <header className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-4">
+      <Link
+        href="/scans"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" /> Spaces
+      </Link>
+      <Logo />
+      <ProfileLink />
+    </header>
+  )
+}
+
+/**
+ * The space's photo with an Edit button overlaid top-right. Edit leads to the
+ * scan detail/overview page — the only entry point to view & edit the space's
+ * details now that the create flow lands straight on the plan.
+ */
+function SpacePhoto({
+  photoUrl,
+  alt,
+  editHref,
+}: {
+  photoUrl: string | null
+  alt: string
+  editHref: string
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-2xl bg-secondary">
+      {photoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={photoUrl} alt={alt} className="aspect-[4/3] w-full object-cover" />
+      ) : (
+        <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-1 text-muted-foreground">
+          <ImageOff className="h-7 w-7" />
+          <span className="text-xs">No photo added</span>
+        </div>
+      )}
+      <Button asChild size="sm" variant="secondary" className="absolute right-3 top-3 gap-1 shadow-sm">
+        <Link href={editHref}>
+          <Pencil className="h-4 w-4" /> Edit
+        </Link>
+      </Button>
     </div>
   )
 }
