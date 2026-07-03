@@ -13,6 +13,7 @@ import {
   initialsFor,
   type UserProfile,
 } from '@/lib/profile'
+import { updateProfile } from '@/lib/profile-client'
 import { AvatarUploader } from './avatar-uploader'
 import { AccountActions } from './account-actions'
 import { Button } from '@/components/ui/button'
@@ -37,7 +38,6 @@ export function ProfileForm({
   const [displayName, setDisplayName] = useState(profile.display_name ?? '')
   const [maintenance, setMaintenance] = useState<string>(profile.maintenance_preference ?? UNSET)
   const [experience, setExperience] = useState<string>(profile.experience_level ?? UNSET)
-  const [avatarPath, setAvatarPath] = useState<string | null>(profile.avatar_path)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -59,16 +59,8 @@ export function ProfileForm({
 
     setSaving(true)
     try {
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({
-          display_name: parsed.data.display_name.trim() || null,
-          maintenance_preference: parsed.data.maintenance_preference,
-          experience_level: parsed.data.experience_level,
-          avatar_path: avatarPath,
-        })
-        .eq('id', profile.id)
-      if (updateError) throw updateError
+      // avatar_path is owned entirely by the uploader (persisted on upload/remove).
+      await updateProfile(supabase, profile.id, parsed.data)
       toast.success('Profile saved.')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not save your profile.')
@@ -81,12 +73,7 @@ export function ProfileForm({
     <form onSubmit={handleSave} className="space-y-6">
       <div className="space-y-2">
         <Label>Profile picture</Label>
-        <AvatarUploader
-          userId={profile.id}
-          initials={initials}
-          initialUrl={avatarUrl}
-          onPathChange={setAvatarPath}
-        />
+        <AvatarUploader userId={profile.id} initials={initials} initialUrl={avatarUrl} />
       </div>
 
       <div className="space-y-2">

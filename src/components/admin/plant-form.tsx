@@ -16,12 +16,12 @@ import {
   NOTES_MAX,
   SIZE_MIN_CM,
   SIZE_MAX_CM,
-  PLANTS_TABLE,
   plantSchema,
   type Plant,
   type SunExposure,
   type Soil,
 } from '@/lib/plants'
+import { isUniqueViolation, savePlant } from '@/lib/plants-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -108,41 +108,20 @@ export function PlantForm({ plant }: { plant: Plant | null }) {
     setErrors({})
     setSaving(true)
 
-    const fields = {
-      common_name: parsed.data.common_name,
-      latin_name: parsed.data.latin_name,
-      sun_tolerance: parsed.data.sun_tolerance,
-      soil_compatibility: parsed.data.soil_compatibility,
-      min_hardiness_zone: parsed.data.min_hardiness_zone,
-      mature_height_cm: parsed.data.mature_height_cm,
-      mature_spread_cm: parsed.data.mature_spread_cm,
-      maintenance_level: parsed.data.maintenance_level,
-      plant_type: parsed.data.plant_type,
-      native: parsed.data.native,
-      image_url: parsed.data.image_url?.trim() || null,
-      care_notes: parsed.data.care_notes?.trim() || null,
-    }
-
     try {
-      const { error } = isEdit
-        ? await supabase.from(PLANTS_TABLE).update(fields).eq('id', plant.id)
-        : await supabase.from(PLANTS_TABLE).insert(fields)
-
-      if (error) {
-        // 23505 = unique_violation on latin_name → friendly, field-level message.
-        if (error.code === '23505') {
-          setErrors({ latin_name: 'A plant with this Latin name already exists.' })
-          toast.error('That Latin name is already in the catalogue.')
-          setSaving(false)
-          return
-        }
-        throw error
-      }
+      await savePlant(supabase, { existing: plant, values: parsed.data })
 
       toast.success(isEdit ? 'Plant updated.' : 'Plant added.')
       router.push('/admin/plants')
       router.refresh()
     } catch (err) {
+      // unique_violation on latin_name → friendly, field-level message.
+      if (isUniqueViolation(err)) {
+        setErrors({ latin_name: 'A plant with this Latin name already exists.' })
+        toast.error('That Latin name is already in the catalogue.')
+        setSaving(false)
+        return
+      }
       toast.error(err instanceof Error ? err.message : 'Could not save the plant. Please try again.')
       setSaving(false)
     }

@@ -81,6 +81,70 @@ export function footprintSqm(plant: Pick<Plant, 'mature_spread_cm'>): number {
   return m * m
 }
 
+// ─── Quantity maths shared by generation AND the PROJ-7 rebalance ────────────
+// One implementation for density, per-layer area, per-plant quantity and the
+// global cap, so the two paths cannot drift apart ("same per-layer footprint
+// maths as generation" is enforced by construction, not by hand).
+
+/** Density factor for a surface — paved/gravel plans plant about half as densely. */
+function densityFor(surface: Surface): number {
+  return surface === 'gravel' || surface === 'paved' ? PAVED_DENSITY_FACTOR : 1
+}
+
+/** One layer's share of the site area, weighted across the layers present. */
+function layerAreaSqm(areaSqm: number, layer: PlantType, presentLayers: PlantType[]): number {
+  const totalWeight = presentLayers.reduce((s, l) => s + LAYER_WEIGHT[l], 0) || 1
+  return (areaSqm * LAYER_WEIGHT[layer]) / totalWeight
+}
+
+/** The quantity that fills `perArea` m² at the plant's mature spread (≥ 1). */
+function quantityFor(
+  plant: Pick<Plant, 'mature_spread_cm'>,
+  perArea: number,
+  density: number,
+): number {
+  return Math.max(1, Math.round((perArea / footprintSqm(plant)) * density))
+}
+
+/**
+ * Cap the summed quantities at `cap`: scale DOWN only the adjustable entries
+ * (each stays ≥ 1), then decrement the largest adjustable entry until the total
+ * fits. Fixed entries (the user's pinned choices) are never changed. Returns
+ * the capped quantities in input order.
+ */
+function capQuantities(
+  entries: { quantity: number; adjustable: boolean }[],
+  cap: number,
+): number[] {
+  const result = entries.map((e) => e.quantity)
+  let total = result.reduce((s, q) => s + q, 0)
+  if (total <= cap) return result
+
+  const fixedTotal = entries.reduce((s, e) => (e.adjustable ? s : s + e.quantity), 0)
+  const budget = Math.max(0, cap - fixedTotal)
+  const adjustableTotal = total - fixedTotal
+  if (adjustableTotal > budget && adjustableTotal > 0) {
+    const factor = budget / adjustableTotal
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i].adjustable) result[i] = Math.max(1, Math.floor(result[i] * factor))
+    }
+  }
+
+  total = result.reduce((s, q) => s + q, 0)
+  let guard = 0
+  while (total > cap && guard++ < 100000) {
+    let largest = -1
+    for (let i = 0; i < entries.length; i++) {
+      if (!entries[i].adjustable) continue
+      if (result[i] > 1 && (largest === -1 || result[i] > result[largest])) largest = i
+    }
+    if (largest === -1) break
+    result[largest] -= 1
+    total -= 1
+  }
+  return result
+}
+
 /** Target species richness for a given area — floor..ceiling, ~+1 per doubling. */
 export function richnessForArea(areaSqm: number): number {
   const raw =
@@ -186,51 +250,31 @@ export function computeQuantities(input: {
   pinned: Record<string, number>
 }): Record<string, number> {
   const { plants, areaSqm, surface, pinned } = input
-  const density = surface === 'gravel' || surface === 'paved' ? PAVED_DENSITY_FACTOR : 1
+  const density = densityFor(surface)
   const present = LAYER_DISPLAY_ORDER.filter((l) => plants.some((p) => p.plant_type === l))
-  const totalWeight = present.reduce((s, l) => s + LAYER_WEIGHT[l], 0) || 1
 
   const result: Record<string, number> = {}
   for (const layer of present) {
     const inLayer = plants.filter((p) => p.plant_type === layer)
-    const layerArea = (areaSqm * LAYER_WEIGHT[layer]) / totalWeight
+    const layerArea = layerAreaSqm(areaSqm, layer, present)
     const pinnedInLayer = inLayer.filter((p) => pinned[p.id] != null)
     const unpinnedInLayer = inLayer.filter((p) => pinned[p.id] == null)
     const pinnedClaim = pinnedInLayer.reduce((s, p) => s + pinned[p.id] * footprintSqm(p), 0)
     const remaining = Math.max(0, layerArea - pinnedClaim)
     const perArea = unpinnedInLayer.length ? remaining / unpinnedInLayer.length : 0
     for (const p of pinnedInLayer) result[p.id] = Math.max(1, Math.round(pinned[p.id]))
-    for (const p of unpinnedInLayer) {
-      result[p.id] = Math.max(1, Math.round((perArea / footprintSqm(p)) * density))
-    }
+    for (const p of unpinnedInLayer) result[p.id] = quantityFor(p, perArea, density)
   }
 
   // Global cap — scale DOWN the un-pinned quantities only (pinned values are the
   // user's explicit choice and are preserved).
-  let total = Object.values(result).reduce((s, q) => s + q, 0)
-  if (total > TOTAL_QUANTITY_CAP) {
-    const pinnedTotal = plants
-      .filter((p) => pinned[p.id] != null)
-      .reduce((s, p) => s + result[p.id], 0)
-    const budget = Math.max(0, TOTAL_QUANTITY_CAP - pinnedTotal)
-    const unpinned = plants.filter((p) => pinned[p.id] == null)
-    const unpinnedTotal = unpinned.reduce((s, p) => s + result[p.id], 0)
-    if (unpinnedTotal > budget && unpinnedTotal > 0) {
-      const factor = budget / unpinnedTotal
-      for (const p of unpinned) result[p.id] = Math.max(1, Math.floor(result[p.id] * factor))
-    }
-    total = Object.values(result).reduce((s, q) => s + q, 0)
-    let guard = 0
-    while (total > TOTAL_QUANTITY_CAP && guard++ < 100000) {
-      let largest: string | null = null
-      for (const p of unpinned) {
-        if (result[p.id] > 1 && (largest === null || result[p.id] > result[largest])) largest = p.id
-      }
-      if (!largest) break
-      result[largest] -= 1
-      total -= 1
-    }
-  }
+  const capped = capQuantities(
+    plants.map((p) => ({ quantity: result[p.id], adjustable: pinned[p.id] == null })),
+    TOTAL_QUANTITY_CAP,
+  )
+  plants.forEach((p, i) => {
+    result[p.id] = capped[i]
+  })
   return result
 }
 
@@ -315,25 +359,6 @@ function speciesSharePerLayer(
   return share
 }
 
-/** Scale quantities down to the cap, keeping at least one of each chosen plant. */
-function applyCap(lines: GeneratedLine[], cap: number): void {
-  let total = lines.reduce((s, l) => s + l.quantity, 0)
-  if (total <= cap) return
-  const factor = cap / total
-  for (const l of lines) l.quantity = Math.max(1, Math.floor(l.quantity * factor))
-  total = lines.reduce((s, l) => s + l.quantity, 0)
-  let guard = 0
-  while (total > cap && guard++ < 100000) {
-    let largest: GeneratedLine | null = null
-    for (const l of lines) {
-      if (l.quantity > 1 && (largest === null || l.quantity > largest.quantity)) largest = l
-    }
-    if (!largest) break
-    largest.quantity -= 1
-    total -= 1
-  }
-}
-
 export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
   const { scan, enrichment, catalogue, maintenancePreference } = input
 
@@ -343,7 +368,7 @@ export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
 
   const area = scan.area_sqm
   const prepNote = scan.surface === 'gravel' || scan.surface === 'paved'
-  const densityFactor = prepNote ? PAVED_DENSITY_FACTOR : 1
+  const densityFactor = densityFor(scan.surface)
 
   const snapshot: PlanSnapshot = {
     sun: scan.sun_exposure,
@@ -386,20 +411,18 @@ export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
   const richness = richnessForArea(area)
   const share = speciesSharePerLayer(presentLayers, byLayer, richness)
 
-  // 4. Area allocation per layer (same weights as the species split).
-  const totalWeight = presentLayers.reduce((s, l) => s + LAYER_WEIGHT[l], 0)
-
-  // 5. Choose species + compute quantities.
+  // 4./5. Choose species + compute quantities (area allocation per layer uses
+  // the same weights as the species split — see layerAreaSqm).
   const lines: GeneratedLine[] = []
   let sortOrder = 0
   for (const layer of LAYER_DISPLAY_ORDER) {
     if (!byLayer.has(layer)) continue
     const chosen = byLayer.get(layer)!.slice(0, share.get(layer)!)
     if (chosen.length === 0) continue
-    const layerArea = (area * LAYER_WEIGHT[layer]) / totalWeight
+    const layerArea = layerAreaSqm(area, layer, presentLayers)
     const perSpeciesArea = layerArea / chosen.length
     for (const plant of chosen) {
-      const qty = Math.max(1, Math.round((perSpeciesArea / footprintSqm(plant)) * densityFactor))
+      const qty = quantityFor(plant, perSpeciesArea, densityFactor)
       lines.push({
         plant,
         layer,
@@ -417,8 +440,14 @@ export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
 
   if (lines.length === 0) return empty()
 
-  // 6. Global quantity cap.
-  applyCap(lines, TOTAL_QUANTITY_CAP)
+  // 6. Global quantity cap (all generated lines are adjustable — nothing is pinned yet).
+  const capped = capQuantities(
+    lines.map((l) => ({ quantity: l.quantity, adjustable: true })),
+    TOTAL_QUANTITY_CAP,
+  )
+  lines.forEach((l, i) => {
+    l.quantity = capped[i]
+  })
 
   return {
     lines,

@@ -14,7 +14,8 @@ import {
   type Plant,
 } from '@/lib/plants'
 import { sunLabel, type Scan, type ScanEnrichment } from '@/lib/scans'
-import { PLAN_PLANTS_TABLE, needsPrep, type Plan, type PlanPlantWithPlant } from '@/lib/plans'
+import { needsPrep, type Plan, type PlanPlantWithPlant } from '@/lib/plans'
+import { replacePlanLines } from '@/lib/plans-client'
 import { computeQuantities } from '@/lib/plan-engine'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -97,20 +98,16 @@ export function PlanEditor({
   async function persist(next: Line[]) {
     setSaving(true)
     try {
-      const rows = next.map((l, i) => ({
-        plan_id: plan.id,
-        plant_id: l.plant.id,
-        quantity: l.quantity,
-        sort_order: i,
-        soil_flag: l.soilFlag,
-        pinned: l.pinned,
-      }))
-      const { error: delErr } = await supabase.from(PLAN_PLANTS_TABLE).delete().eq('plan_id', plan.id)
-      if (delErr) throw delErr
-      if (rows.length > 0) {
-        const { error: insErr } = await supabase.from(PLAN_PLANTS_TABLE).insert(rows)
-        if (insErr) throw insErr
-      }
+      await replacePlanLines(
+        supabase,
+        plan.id,
+        next.map((l) => ({
+          plantId: l.plant.id,
+          quantity: l.quantity,
+          soilFlag: l.soilFlag,
+          pinned: l.pinned,
+        })),
+      )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not save your changes.')
     } finally {

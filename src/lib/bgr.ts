@@ -14,10 +14,13 @@
  *     layers=visible&mapExtent=5,47,16,56&imageDisplay=400,400,96&tolerance=2&f=json"
  */
 
+import type { Soil } from '@/lib/soil'
+
 const BGR_BASE = 'https://services.bgr.de/arcgis/rest/services/boden/buek200/MapServer'
 const BGR_TIMEOUT_MS = 8_000
 
-export type SoilType = 'sand' | 'loam' | 'clay' | 'silt' | 'peat'
+/** The shared five-bucket soil vocabulary (src/lib/soil.ts) — BGR produces it. */
+export type SoilType = Soil
 
 /** Fetch the dominant soil type at the given WGS84 coordinate from BGR BÜK200. */
 export async function fetchSoilType(lat: number, lng: number): Promise<SoilType | null> {

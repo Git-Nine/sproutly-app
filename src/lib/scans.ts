@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { optionValues } from '@/lib/utils'
+import type { Soil } from '@/lib/soil'
 
 /**
  * Scan option sets + validation for PROJ-3 (Photo Upload & Space Scan).
@@ -84,7 +86,7 @@ export type ScanEnrichment = {
   user_id: string
   status: EnrichmentOverallStatus
   requested_at: string
-  soil_type: 'sand' | 'loam' | 'clay' | 'silt' | 'peat' | null
+  soil_type: Soil | null
   soil_status: EnrichmentFieldStatus
   rainfall_mm: number | null
   annual_min_temp: number | null
@@ -101,13 +103,9 @@ export type ScanEnrichment = {
 export const scanSchema = z.object({
   name: z.string().trim().max(NAME_MAX, `Keep the name under ${NAME_MAX} characters`),
   postcode: z.string().regex(/^\d{5}$/, 'Enter a 5-digit German postcode'),
-  sun_exposure: z.enum(['full', 'partial', 'shade'], { message: 'Choose the sun exposure' }),
-  surface: z.enum(['gravel', 'lawn', 'soil', 'paved', 'mixed'], {
-    message: 'Choose the current surface',
-  }),
-  space_type: z.enum(['front_garden', 'back_garden', 'balcony', 'bed'], {
-    message: 'Choose the space type',
-  }),
+  sun_exposure: z.enum(optionValues(SUN_OPTIONS), { message: 'Choose the sun exposure' }),
+  surface: z.enum(optionValues(SURFACE_OPTIONS), { message: 'Choose the current surface' }),
+  space_type: z.enum(optionValues(SPACE_TYPE_OPTIONS), { message: 'Choose the space type' }),
   area_sqm: z
     .number({ message: 'Enter an approximate area' })
     .int('Use a whole number of m²')

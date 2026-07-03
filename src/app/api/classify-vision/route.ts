@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { createClient } from '@/lib/supabase/server'
+import { parseJson, requireUser } from '@/lib/api'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { optionValues } from '@/lib/utils'
 import {
   STORAGE_BUCKET,
   SURFACE_OPTIONS,
@@ -44,19 +45,13 @@ const bodySchema = z.object({
   scan_draft_id: z.string().uuid('scan_draft_id must be a valid UUID').nullable().optional(),
 })
 
-// Build zod enums from the single source of truth in src/lib/scans.ts so the
+// Zod enums derive from the single source of truth in src/lib/scans.ts so the
 // route's response validation stays in lockstep with the DB check constraints
 // and the n8n prompt (see the enum-lockstep note in the workflow doc).
-function enumValues<T extends readonly { value: string }[]>(
-  opts: T,
-): [T[number]['value'], ...T[number]['value'][]] {
-  return opts.map((o) => o.value) as [T[number]['value'], ...T[number]['value'][]]
-}
-
 const fieldsSchema = z.object({
-  surface: z.enum(enumValues(SURFACE_OPTIONS)),
-  space_type: z.enum(enumValues(SPACE_TYPE_OPTIONS)),
-  sun_exposure: z.enum(enumValues(SUN_OPTIONS)),
+  surface: z.enum(optionValues(SURFACE_OPTIONS)),
+  space_type: z.enum(optionValues(SPACE_TYPE_OPTIONS)),
+  sun_exposure: z.enum(optionValues(SUN_OPTIONS)),
   area_sqm: z.number().int().min(AREA_MIN).max(AREA_MAX),
 })
 
@@ -78,29 +73,13 @@ const FALLBACK: ClassifyResponse = {
 // ─── Route handler ───────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const auth = await requireUser()
+  if (auth.response) return auth.response
+  const { user } = auth
 
-  if (!user) {
-    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
-  }
-
-  let parsed: ReturnType<typeof bodySchema.safeParse>
-  try {
-    parsed = bodySchema.safeParse(await request.json())
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
-  }
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? 'Invalid request.' },
-      { status: 400 },
-    )
-  }
-
-  const { photo_path, postcode, scan_draft_id = null } = parsed.data
+  const body = await parseJson(request, bodySchema)
+  if (body.response) return body.response
+  const { photo_path, postcode, scan_draft_id = null } = body.data
 
   // SECURITY: the admin client below bypasses RLS, so we must confirm the
   // requested object lives in THIS user's namespace before minting a signed URL

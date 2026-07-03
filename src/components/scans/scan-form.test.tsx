@@ -50,6 +50,11 @@ function pickPhoto() {
   fireEvent.change(input, { target: { files: [file] } })
 }
 
+/** Wizard step 1 → step 3: skip the photo to reach the editable review screen. */
+function skipPhoto() {
+  fireEvent.click(screen.getByRole('button', { name: /no photo handy/i }))
+}
+
 describe('ScanForm — n8n scan-vision prefill', () => {
   beforeEach(() => {
     // jsdom lacks object-URL support that PhotoPicker uses for the preview.
@@ -96,8 +101,9 @@ describe('ScanForm — n8n scan-vision prefill', () => {
     expect(body.photo_path.startsWith(`${USER_ID}/`)).toBe(true)
     expect(body.scan_draft_id).toBeTruthy()
 
-    // The returned area lands in the editable field, and the prefill hint shows.
-    const area = screen.getByLabelText(/approximate area/i) as HTMLInputElement
+    // After "Reading your space…" the flow lands on the review step: the returned
+    // area lands in the editable field, and the prefill hint shows.
+    const area = (await screen.findByLabelText(/approximate area/i)) as HTMLInputElement
     await waitFor(() => expect(area.value).toBe('8'))
     expect(screen.getByText(/we filled in what we could see/i)).toBeInTheDocument()
   })
@@ -125,9 +131,8 @@ describe('ScanForm — n8n scan-vision prefill', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/classify-vision', expect.objectContaining({ method: 'POST' })),
     )
 
-    const area = screen.getByLabelText(/approximate area/i) as HTMLInputElement
-    // Give any (unexpected) prefill a chance to land, then assert it did NOT.
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    // The fallback read still advances to the review step, but with blank fields.
+    const area = (await screen.findByLabelText(/approximate area/i)) as HTMLInputElement
     expect(area.value).toBe('')
     expect(screen.queryByText(/we filled in what we could see/i)).not.toBeInTheDocument()
   })
@@ -154,6 +159,7 @@ describe('ScanForm — "Use my location" postcode fallback', () => {
     vi.stubGlobal('navigator', { geolocation: { getCurrentPosition } })
 
     render(<ScanForm userId={USER_ID} scan={null} photoUrl={null} />)
+    skipPhoto()
     fireEvent.click(screen.getByRole('button', { name: /use my location/i }))
 
     // It reverse-geocodes the device coordinates...
@@ -180,6 +186,7 @@ describe('ScanForm — "Use my location" postcode fallback', () => {
     vi.stubGlobal('navigator', { geolocation: { getCurrentPosition } })
 
     render(<ScanForm userId={USER_ID} scan={null} photoUrl={null} />)
+    skipPhoto()
     fireEvent.click(screen.getByRole('button', { name: /use my location/i }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/permission denied/i)))

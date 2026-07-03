@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireUser } from '@/lib/api'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { STORAGE_BUCKET } from '@/lib/scans'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -43,14 +43,9 @@ async function listUserObjectPaths(
 
 export async function POST() {
   // Identify the caller from their session cookie — never trust a client-supplied id.
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
-  }
+  const auth = await requireUser()
+  if (auth.response) return auth.response
+  const { user } = auth
 
   const admin = createAdminClient()
 
