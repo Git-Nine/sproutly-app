@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { ChevronDown, Leaf, Minus, Plus, RotateCcw, Shovel, Sprout, TriangleAlert, X } from 'lucide-react'
+import { ChevronDown, Layers, Leaf, Minus, Plus, RotateCcw, Ruler, Shovel, Snowflake, Sprout, Sun, Trees, TriangleAlert, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
   LAYER_DISPLAY_ORDER,
@@ -13,7 +13,8 @@ import {
   maintenanceLabel,
   type Plant,
 } from '@/lib/plants'
-import { sunLabel, type Scan, type ScanEnrichment } from '@/lib/scans'
+import { sunLabel, surfaceLabel, spaceTypeLabel, type Scan, type ScanEnrichment } from '@/lib/scans'
+import { ConditionChips, type ConditionChip } from '@/components/plans/plan-conditions'
 import { needsPrep, type Plan, type PlanPlantWithPlant } from '@/lib/plans'
 import { replacePlanLines } from '@/lib/plans-client'
 import { computeQuantities } from '@/lib/plan-engine'
@@ -169,11 +170,21 @@ export function PlanEditor({
     saveNow(next)
   }
 
-  const conditions = [
-    { label: 'Sun', value: sunLabel(plan.snapshot_sun) },
-    { label: 'Winter zone', value: plan.snapshot_zone != null ? `Zone ${plan.snapshot_zone}` : 'Not available' },
-    { label: 'Soil', value: plan.snapshot_soil ? soilLabel(plan.snapshot_soil) : 'Not available' },
+  // Chips describe the conditions the plan was *based on* (its snapshot), which
+  // may differ from the current scan when the plan is stale — hence sourced from
+  // the snapshot, not the live scan. Nullable env chips appear only when known.
+  const conditionChips: ConditionChip[] = [
+    { icon: <Sun className="h-3.5 w-3.5" />, label: sunLabel(plan.snapshot_sun) },
+    { icon: <Layers className="h-3.5 w-3.5" />, label: surfaceLabel(plan.snapshot_surface) },
+    { icon: <Trees className="h-3.5 w-3.5" />, label: spaceTypeLabel(plan.snapshot_space_type) },
+    { icon: <Ruler className="h-3.5 w-3.5" />, label: `${plan.snapshot_area_sqm} m²` },
   ]
+  if (plan.snapshot_soil) {
+    conditionChips.push({ icon: <Leaf className="h-3.5 w-3.5" />, label: `${soilLabel(plan.snapshot_soil)} soil` })
+  }
+  if (plan.snapshot_zone != null) {
+    conditionChips.push({ icon: <Snowflake className="h-3.5 w-3.5" />, label: `Zone ${plan.snapshot_zone}` })
+  }
 
   return (
     <div className="space-y-6">
@@ -197,22 +208,13 @@ export function PlanEditor({
         </div>
       )}
 
-      {/* Conditions the plan was based on */}
-      <Card>
-        <CardContent className="p-0">
-          <p className="px-5 pt-4 font-mono text-[11px] uppercase tracking-wider text-label">
-            Based on your conditions
-          </p>
-          <div className="divide-y divide-border">
-            {conditions.map((c) => (
-              <div key={c.label} className="flex items-center justify-between px-5 py-3">
-                <span className="text-sm text-muted-foreground">{c.label}</span>
-                <span className="text-sm font-medium">{c.value}</span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Conditions the plan was based on — compact chip strip */}
+      <div>
+        <p className="font-mono text-[11px] uppercase tracking-wider text-label">
+          Based on your conditions
+        </p>
+        <ConditionChips chips={conditionChips} className="mt-2" />
+      </div>
 
       {/* Honest notes */}
       {plan.zone_unconfirmed && (

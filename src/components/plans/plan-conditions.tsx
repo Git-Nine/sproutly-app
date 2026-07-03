@@ -8,11 +8,34 @@ import {
   type ScanEnrichment,
 } from '@/lib/scans'
 
+export type ConditionChip = { icon: React.ReactNode; label: string }
+
 /**
- * A compact, single-line-wrapping chip strip of the scan's conditions, shown at
- * the top of the plan screen so the plan has context without the full-size
- * "Your conditions" card. Environmental chips (soil, hardiness zone) appear only
- * once enrichment has resolved them.
+ * Presentational compact chip strip. Single-line-wrapping pills used to show a
+ * space's conditions without the full-size card — shared by the plan screen's
+ * "current conditions" (auto-build) and "based on" (built plan) strips.
+ */
+export function ConditionChips({ chips, className }: { chips: ConditionChip[]; className?: string }) {
+  return (
+    <div className={cn('flex flex-wrap gap-1.5', className)}>
+      {chips.map((c) => (
+        <span
+          key={c.label}
+          className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground"
+        >
+          <span className="text-accent">{c.icon}</span>
+          {c.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * A compact chip strip of the scan's *current* conditions, shown at the top of
+ * the plan screen while the plan auto-builds so it has context without the
+ * full-size "Your conditions" card. Environmental chips (soil, hardiness zone)
+ * appear only once enrichment has resolved them.
  */
 export function PlanConditions({
   scan,
@@ -23,7 +46,7 @@ export function PlanConditions({
   enrichment: ScanEnrichment | null
   className?: string
 }) {
-  const chips: { icon: React.ReactNode; label: string }[] = [
+  const chips: ConditionChip[] = [
     { icon: <Sun className="h-3.5 w-3.5" />, label: sunLabel(scan.sun_exposure) },
     { icon: <Layers className="h-3.5 w-3.5" />, label: surfaceLabel(scan.surface) },
     { icon: <Trees className="h-3.5 w-3.5" />, label: spaceTypeLabel(scan.space_type) },
@@ -39,19 +62,7 @@ export function PlanConditions({
     chips.push({ icon: <Snowflake className="h-3.5 w-3.5" />, label: `Zone ${enrichment.hardiness_zone}` })
   }
 
-  return (
-    <div className={cn('flex flex-wrap gap-1.5', className)}>
-      {chips.map((c) => (
-        <span
-          key={c.label}
-          className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground"
-        >
-          <span className="text-accent">{c.icon}</span>
-          {c.label}
-        </span>
-      ))}
-    </div>
-  )
+  return <ConditionChips chips={chips} className={className} />
 }
 
 function capitalize(s: string) {
