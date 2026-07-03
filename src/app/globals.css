@@ -5,19 +5,19 @@
 @layer base {
   :root {
     /* Sproutly design system — calm greens + warm neutrals (see docs/design-system.md) */
-    --background: 40 27% 93%;        /* warm cream canvas */
+    --background: 72 21% 91%;        /* light green canvas */
     --foreground: 60 4% 11%;         /* near-black text */
     --card: 0 0% 100%;               /* white cards on cream */
     --card-foreground: 60 4% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 60 4% 11%;
-    --primary: 96 22% 19%;           /* deep forest green */
+    --primary: 107 55% 22%;           /* deep forest green */
     --primary-foreground: 40 27% 93%;
-    --secondary: 36 28% 81%;         /* warm taupe (feature cards) */
+    --secondary: 86 20% 84%;         /* warm taupe (feature cards) */
     --secondary-foreground: 96 22% 19%;
-    --muted: 40 25% 90%;
-    --muted-foreground: 34 11% 38%;  /* warm grey-brown */
-    --accent: 100 20% 52%;           /* muted sage */
+    --muted: 40 27% 93%;            /* 40 27% 93% oder 36 28% 81% */
+    --muted-foreground: 34 11% 38%;  /* warm green */
+    --accent: 94 16% 72%;           /* muted sage */
     --accent-foreground: 0 0% 100%;
     --destructive: 18 52% 50%;       /* terracotta */
     --destructive-foreground: 0 0% 100%;
