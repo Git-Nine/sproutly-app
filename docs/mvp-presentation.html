@@ -1,0 +1,539 @@
+<title>Directing Agentic AI — Sproutly Build Log</title>
+<style>
+  :root {
+    --ground: #0E1E19;
+    --ground-2: #14271F;
+    --surface: #16302A;
+    --text: #ECE6D7;
+    --muted: #9DB0A4;
+    --accent: #F0A93B;
+    --accent-2: #7FB59A;
+    --rail: #2C4A40;
+    --rail-soft: rgba(127, 181, 154, 0.10);
+    --font-display: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background-color: var(--ground);
+    background-image:
+      linear-gradient(90deg, var(--rail-soft) 1px, transparent 1px),
+      linear-gradient(var(--rail-soft) 1px, transparent 1px);
+    background-size: 56px 56px;
+    color: var(--text);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.5;
+    scroll-behavior: smooth;
+  }
+  html { scroll-snap-type: y proximity; }
+
+  /* ---- persistent HUD ---- */
+  .hud {
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 50;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 26px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .hud .brand { color: var(--accent-2); }
+  .hud .brand b { color: var(--text); font-weight: 600; }
+  .hud .count { color: var(--text); }
+  .hud .count em { color: var(--accent); font-style: normal; }
+
+  .progress {
+    position: fixed;
+    top: 0; left: 0;
+    height: 2px;
+    width: 0%;
+    background: var(--accent);
+    z-index: 60;
+    transition: width 0.15s linear;
+  }
+
+  /* persistent rails (the guardrail motif) */
+  .rails { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+  .rails::before, .rails::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: var(--rail);
+    opacity: 0.6;
+  }
+  .rails::before { left: 40px; }
+  .rails::after { right: 40px; }
+
+  /* ---- slides ---- */
+  .slide {
+    min-height: 100vh;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 88px 72px 64px;
+    scroll-snap-align: start;
+    position: relative;
+    border-bottom: 1px solid var(--rail);
+  }
+  .slide-inner { width: 100%; max-width: 980px; margin: 0 auto; }
+
+  .slide-no {
+    position: absolute;
+    bottom: 28px; left: 72px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.2em;
+    color: var(--rail);
+  }
+  .slide-no b { color: var(--accent-2); font-weight: 600; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 22px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 26px; height: 1px;
+    background: var(--accent);
+    display: inline-block;
+  }
+
+  h1, h2 { font-family: var(--font-display); font-weight: 800; letter-spacing: -0.03em; margin: 0; }
+  h1 { font-size: clamp(2.4rem, 6vw, 4.6rem); line-height: 1.02; }
+  h2 { font-size: clamp(1.7rem, 3.6vw, 2.9rem); line-height: 1.06; margin-bottom: 28px; }
+  .lede { font-size: clamp(1.05rem, 1.7vw, 1.3rem); color: var(--muted); max-width: 60ch; margin: 26px 0 0; }
+
+  .mono { font-family: var(--font-mono); }
+  .amber { color: var(--accent); }
+  .sage { color: var(--accent-2); }
+
+  /* hero */
+  .hero h1 .alt { color: var(--accent); }
+  .telemetry {
+    margin-top: 48px;
+    border: 1px solid var(--rail);
+    background: rgba(20, 39, 31, 0.6);
+    border-radius: 10px;
+    padding: 22px 24px;
+  }
+  .telemetry-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 18px;
+  }
+  .telemetry-head .ok { color: var(--accent-2); }
+  .dots { display: flex; flex-wrap: wrap; gap: 10px; }
+  .dot {
+    flex: 1 1 96px;
+    min-width: 88px;
+    border: 1px solid var(--rail);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .dot .led {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--rail);
+    flex: none;
+    box-shadow: none;
+  }
+  .dot.lit { color: var(--text); border-color: var(--accent-2); }
+  .dot.lit .led { background: var(--accent-2); box-shadow: 0 0 9px var(--accent-2); }
+
+  .scroll-hint {
+    margin-top: 40px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--rail);
+  }
+  .scroll-hint span { color: var(--accent-2); }
+
+  /* stat row */
+  .stats { display: flex; flex-wrap: wrap; gap: 40px; margin-top: 38px; }
+  .stat .big { font-size: clamp(2.2rem, 4.5vw, 3.4rem); font-weight: 800; letter-spacing: -0.03em; color: var(--accent); line-height: 1; }
+  .stat .lbl { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-top: 8px; }
+
+  /* pipeline */
+  .pipeline { display: flex; flex-direction: column; gap: 0; margin-top: 8px; }
+  .step {
+    display: grid;
+    grid-template-columns: 56px 168px 1fr;
+    align-items: baseline;
+    gap: 22px;
+    padding: 16px 0;
+    border-top: 1px solid var(--rail);
+  }
+  .step:last-child { border-bottom: 1px solid var(--rail); }
+  .step .num { font-family: var(--font-mono); font-size: 13px; color: var(--accent-2); letter-spacing: 0.1em; }
+  .step .cmd { font-family: var(--font-mono); font-size: 15px; color: var(--accent); font-weight: 600; }
+  .step .desc { color: var(--muted); font-size: 0.98rem; }
+  .pipeline-foot {
+    margin-top: 20px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .pipeline-foot b { color: var(--accent-2); font-weight: 600; }
+
+  /* principle / feature cards */
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 8px; }
+  .card {
+    border: 1px solid var(--rail);
+    border-radius: 9px;
+    padding: 18px 20px;
+    background: rgba(20, 39, 31, 0.45);
+  }
+  .card h3 { margin: 0 0 7px; font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; }
+  .card h3 .mono { color: var(--accent); font-weight: 600; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.92rem; line-height: 1.5; }
+  .card .idx { font-family: var(--font-mono); font-size: 11px; color: var(--accent-2); letter-spacing: 0.14em; }
+
+  /* table */
+  .table-wrap { overflow-x: auto; margin-top: 8px; border: 1px solid var(--rail); border-radius: 9px; }
+  table { width: 100%; border-collapse: collapse; min-width: 540px; }
+  th, td { text-align: left; padding: 14px 18px; border-bottom: 1px solid var(--rail); font-size: 0.94rem; vertical-align: top; }
+  th { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent-2); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { font-family: var(--font-mono); color: var(--text); white-space: nowrap; }
+  td .why { color: var(--muted); }
+
+  /* security / stack */
+  .chiprow { display: flex; flex-wrap: wrap; gap: 9px; margin: 4px 0 30px; }
+  .chip { font-family: var(--font-mono); font-size: 12px; color: var(--text); border: 1px solid var(--rail); border-radius: 30px; padding: 6px 13px; background: rgba(20,39,31,0.5); }
+  ul.clean { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  ul.clean li { position: relative; padding-left: 24px; color: var(--muted); font-size: 0.98rem; }
+  ul.clean li::before { content: "▸"; position: absolute; left: 0; color: var(--accent-2); }
+  ul.clean li b { color: var(--text); font-weight: 600; }
+  ul.clean li .mono { color: var(--accent); }
+  .flag { border-left: 2px solid var(--accent); padding: 14px 18px; background: rgba(240,169,59,0.07); border-radius: 0 8px 8px 0; margin-top: 24px; color: var(--text); font-size: 0.95rem; }
+  .flag b { color: var(--accent); }
+
+  /* feature board */
+  .board { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 6px; }
+  .feat {
+    display: flex; align-items: center; gap: 12px;
+    border: 1px solid var(--rail); border-radius: 7px; padding: 12px 15px;
+    background: rgba(20,39,31,0.45);
+  }
+  .feat .fled { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 7px var(--accent-2); flex: none; }
+  .feat .fn { font-family: var(--font-mono); font-size: 11px; color: var(--accent-2); flex: none; }
+  .feat .ft { font-weight: 600; font-size: 0.92rem; flex: none; }
+  .feat .fd { color: var(--muted); font-size: 0.85rem; margin-left: auto; text-align: right; }
+  .statemachine { margin-top: 22px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); line-height: 1.9; }
+  .statemachine .on { color: var(--accent); }
+
+  /* takeaways */
+  .takeaways { counter-reset: t; display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px 30px; margin-top: 8px; }
+  .takeaways .t { counter-increment: t; position: relative; padding: 14px 0 14px 52px; border-top: 1px solid var(--rail); font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; }
+  .takeaways .t::before { content: counter(t, decimal-leading-zero); position: absolute; left: 0; top: 13px; font-family: var(--font-mono); font-size: 13px; color: var(--accent); font-weight: 600; }
+  .closing { margin-top: 40px; font-size: clamp(1.3rem, 2.6vw, 1.9rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+  .closing .amber { color: var(--accent); }
+
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  /* motion */
+  @media (prefers-reduced-motion: no-preference) {
+    .dot { opacity: 0; animation: rise 0.5s ease forwards; }
+    .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.in { opacity: 1; transform: none; }
+  }
+  @keyframes rise { to { opacity: 1; } }
+
+  @media (max-width: 720px) {
+    .rails::before { left: 16px; } .rails::after { right: 16px; }
+    .slide { padding: 84px 30px 60px; }
+    .slide-no { left: 30px; }
+    .grid2, .board, .takeaways { grid-template-columns: 1fr; }
+    .step { grid-template-columns: 44px 1fr; }
+    .step .desc { grid-column: 1 / -1; }
+    .feat .fd { display: none; }
+    .stats { gap: 26px; }
+  }
+</style>
+
+<div class="progress" id="progress"></div>
+<div class="rails"></div>
+<div class="hud">
+  <div class="brand"><b>SPROUTLY</b> ▸ BUILD LOG</div>
+  <div class="count"><em id="cur">01</em> / 09</div>
+</div>
+
+<!-- 01 — HERO -->
+<section class="slide hero" id="s1">
+  <div class="slide-inner">
+    <p class="eyebrow">Session 04 · Directing Agentic AI</p>
+    <h1>We didn't write the app.<br><span class="alt">We directed the agents that did.</span></h1>
+    <p class="lede">Sproutly is a full-stack production MVP — auth, a private database, photo storage, external APIs, a rule engine, a buy-flow. Every feature was built the same way: a human directing specialised AI agents through a spec-driven pipeline, approving at each gate.</p>
+
+    <div class="telemetry">
+      <div class="telemetry-head"><span>PRODUCTION STATUS</span><span class="ok" id="okcount">8 / 8 DEPLOYED</span></div>
+      <div class="dots" id="dots">
+        <div class="dot"><span class="led"></span>P1 INFRA</div>
+        <div class="dot"><span class="led"></span>P2 AUTH</div>
+        <div class="dot"><span class="led"></span>P3 SCAN</div>
+        <div class="dot"><span class="led"></span>P4 ENRICH</div>
+        <div class="dot"><span class="led"></span>P5 PLANTS</div>
+        <div class="dot"><span class="led"></span>P6 PLAN</div>
+        <div class="dot"><span class="led"></span>P7 REVIEW</div>
+        <div class="dot"><span class="led"></span>P8 ORDER</div>
+      </div>
+    </div>
+    <p class="scroll-hint">Scroll or press <span>→</span> to advance</p>
+  </div>
+  <div class="slide-no"><b>01</b> / 09 · The thesis</div>
+</section>
+
+<!-- 02 — THE BRIEF -->
+<section class="slide" id="s2">
+  <div class="slide-inner reveal">
+    <p class="eyebrow">The brief we handed the agents</p>
+    <h2>From a photo of a garden to a plan you can actually buy — in under five minutes.</h2>
+    <p class="lede">Sproutly turns a photo of someone's outdoor space into a personalised, survivable planting plan and a shopping list. Germany-first. The point for us isn't the gardening — it's that the scope is big enough to prove agentic AI can build a <em>whole</em> product, not a toy.</p>
+    <div class="stats">
+      <div class="stat"><div class="big">8</div><div class="lbl">Features shipped to prod</div></div>
+      <div class="stat"><div class="big">7</div><div class="lbl">Gates per feature</div></div>
+      <div class="stat"><div class="big">&lt;5min</div><div class="lbl">Photo → plan, for the user</div></div>
+      <div class="stat"><div class="big">100%</div><div class="lbl">Spec-driven, human-gated</div></div>
+    </div>
+  </div>
+  <div class="slide-no"><b>02</b> / 09 · The product</div>
+</section>
+
+<!-- 03 — THE PIPELINE -->
+<section class="slide" id="s3">
+  <div class="slide-inner reveal">
+    <p class="eyebrow">The workflow · one feature through seven gates</p>
+    <h2>Each feature runs the same pipeline. No vibe coding.</h2>
+    <div class="pipeline">
+      <div class="step"><span class="num">01</span><span class="cmd">/init</span><span class="desc">Define the product — PRD + prioritised feature map. Run once.</span></div>
+      <div class="step"><span class="num">02</span><span class="cmd">/write-spec</span><span class="desc">One feature, one full spec. Acceptance criteria written <em>before</em> code.</span></div>
+      <div class="step"><span class="num">03</span><span class="cmd">/architecture</span><span class="desc">Design the tech approach. PM-friendly, no code yet.</span></div>
+      <div class="step"><span class="num">04</span><span class="cmd">/frontend</span><span class="desc">Build the UI. Installed shadcn/ui components first.</span></div>
+      <div class="step"><span class="num">05</span><span class="cmd">/backend</span><span class="desc">APIs, database schema, row-level security rules.</span></div>
+      <div class="step"><span class="num">06</span><span class="cmd">/qa</span><span class="desc">Test against acceptance criteria + run a security audit.</span></div>
+      <div class="step"><span class="num">07</span><span class="cmd">/deploy</span><span class="desc">Ship to Vercel with production checks.</span></div>
+    </div>
+    <p class="pipeline-foot"><b>/refine PROJ-X</b> — revisit and challenge any spec, at any point.</p>
+  </div>
+  <div class="slide-no"><b>03</b> / 09 · The pipeline</div>
+</section>
+
+<!-- 04 — DIRECTING PRINCIPLES -->
+<section class="slide" id="s4">
+  <div class="slide-inner reveal">
+    <p class="eyebrow">What actually keeps an agent on task</p>
+    <h2>Five things that turn "generate code" into reliable delivery.</h2>
+    <div class="grid2">
+      <div class="card"><h3>Specs are the contract</h3><p>Acceptance criteria exist before any code, so QA tests against something objective — not vibes.</p></div>
+      <div class="card"><h3>One feature per spec</h3><p>Small, bounded units keep the agent focused and the output reviewable in one sitting.</p></div>
+      <div class="card"><h3>Humans gate every phase</h3><p>The agent never jumps a phase without approval. You direct; it executes.</p></div>
+      <div class="card"><h3>Specialised sub-agents</h3><p>Frontend, Backend and QA are separate agents with their own tools and scope — right context for the job.</p></div>
+      <div class="card"><h3>Persistent memory</h3><p><span class="mono">features/INDEX.md</span> is a status state-machine the AI reads at start and writes when done — so it never loses the thread across sessions.</p></div>
+      <div class="card"><h3>The result</h3><p>You stay the architect. The agents do the typing. Nothing ships that a human didn't approve at a gate.</p></div>
+    </div>
+  </div>
+  <div class="slide-no"><b>04</b> / 09 · Directing</div>
+</section>
+
+<!-- 05 — GUARDRAILS -->
+<section class="slide" id="s5">
+  <div class="slide-inner reveal">
+    <p class="eyebrow">Guardrails · steal these for your own projects</p>
+    <h2>Conventions that keep agents on the rails.</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Convention</th><th>Why it helps when directing AI</th></tr></thead>
+        <tbody>
+          <tr><td>PROJ-1, PROJ-2…</td><td class="why">Stable IDs both human and agent reference without ambiguity.</td></tr>
+          <tr><td>feat(PROJ-X):</td><td class="why">Every commit traces straight back to a spec.</td></tr>
+          <tr><td>write-then-verify</td><td class="why">Agent re-reads a file after editing to confirm the change landed — kills "I updated it" hallucinations.</td></tr>
+          <tr><td>read before edit</td><td class="why">Never modify from memory; re-read after any context compaction.</td></tr>
+          <tr><td>shadcn/ui first</td><td class="why">Never re-invent installed components — less surface area to get wrong.</td></tr>
+          <tr><td>tests co-located</td><td class="why">Unit tests next to source, E2E in tests/. QA is built in, not bolted on.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="slide-no"><b>05</b> / 09 · Guardrails</div>
+</section>
+
+<!-- 06 — UNDER THE HOOD -->
+<section class="slide" id="s6">
+  <div class="slide-inner reveal">
+    <p class="eyebrow">Under the hood</p>
+    <h2>The stack, and a security model that's enforced — not aspirational.</h2>
+    <div class="chiprow">
+      <span class="chip">Next.js 16 · App Router</span>
+      <span class="chip">TypeScript</span>
+      <span class="chip">Tailwind + shadcn/ui</span>
+      <span class="chip">Supabase · Postgres/Auth/Storage</span>
+      <span class="chip">Zod + react-hook-form</span>
+      <span class="chip">Vercel</span>
+    </div>
+    <ul class="clean">
+      <li><b>Row Level Security</b> on every user table — <span class="mono">user_id = auth.uid()</span>. You can only ever touch your own rows.</li>
+      <li><b>Private, user-namespaced storage</b> for photos — <span class="mono">/{user_id}/file</span>.</li>
+      <li><b>Role-gated admin</b> routes — <span class="mono">role = 'admin'</span> for the plant catalogue.</li>
+    </ul>
+    <div class="flag"><b>A real QA catch:</b> a Zod <span class="mono">.url()</span> validator was accepting <span class="mono">javascript:</span> and <span class="mono">data:</span> URLs. Caught in <span class="mono">/qa</span>, restricted to http(s). That's the security-audit phase earning its keep.</div>
+  </div>
+  <div class="slide-no"><b>06</b> / 09 · The build</div>
+</section>
+
+<!-- 07 — WHAT SHIPPED -->
+<section class="slide" id="s7">
+  <div class="slide-inner reveal">
+    <p class="eyebrow">What shipped · 8 features, all live</p>
+    <h2>Each green light is a feature that cleared all seven gates.</h2>
+    <div class="board">
+      <div class="feat"><span class="fled"></span><span class="fn">P1</span><span class="ft">Infrastructure</span><span class="fd">auth · RLS · storage</span></div>
+      <div class="feat"><span class="fled"></span><span class="fn">P2</span><span class="ft">Auth &amp; Profile</span><span class="fd">magic-link · GDPR delete</span></div>
+      <div class="feat"><span class="fled"></span><span class="fn">P3</span><span class="ft">Photo Scan</span><span class="fd">upload · EXIF GPS</span></div>
+      <div class="feat"><span class="fled"></span><span class="fn">P4</span><span class="ft">Data Enrichment</span><span class="fd">3 German gov APIs</span></div>
+      <div class="feat"><span class="fled"></span><span class="fn">P5</span><span class="ft">Plant DB + Admin</span><span class="fd">40 natives · safe-delete</span></div>
+      <div class="feat"><span class="fled"></span><span class="fn">P6</span><span class="ft">Plan Generation</span><span class="fd">rule engine</span></div>
+      <div class="feat"><span class="fled"></span><span class="fn">P7</span><span class="ft">Plan Review</span><span class="fd">editor · auto-save</span></div>
+      <div class="feat"><span class="fled"></span><span class="fn">P8</span><span class="ft">Shopping List</span><span class="fd">deep links · flags</span></div>
+    </div>
+    <div class="statemachine">
+      Every feature walks one state-machine:<br>
+      Roadmap → Planned → Architected → In&nbsp;Progress → In&nbsp;Review → Approved → <span class="on">Deployed</span>
+    </div>
+  </div>
+  <div class="slide-no"><b>07</b> / 09 · Shipped</div>
+</section>
+
+<!-- 08 — AI SWAP-IN -->
+<section class="slide" id="s8">
+  <div class="slide-inner reveal">
+    <p class="eyebrow">The killer detail · designed for AI swap-in</p>
+    <h2>Rules today. Models tomorrow. Same database, same frontend.</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Stage</th><th>v1 — built now</th><th>Swap-in — later, same output</th></tr></thead>
+        <tbody>
+          <tr><td>Scan</td><td>EXIF + manual form</td><td class="why">Vision model fills the same fields</td></tr>
+          <tr><td>Plan</td><td>Rule engine over the plant DB</td><td class="why">LLM augments or replaces it, same output shape</td></tr>
+          <tr><td>Order</td><td>Deep links + shopping list</td><td class="why">Garden-centre API + survival-confidence score</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede">The lesson for AI engineers: <span class="sage">separate concerns so the AI layer is a swap, not a rewrite.</span> Define the interface first — the model is just one implementation behind it.</p>
+  </div>
+  <div class="slide-no"><b>08</b> / 09 · Architecture</div>
+</section>
+
+<!-- 09 — TAKEAWAYS -->
+<section class="slide" id="s9">
+  <div class="slide-inner reveal">
+    <p class="eyebrow">Take this back to your own projects</p>
+    <h2>Six principles for directing agentic AI.</h2>
+    <div class="takeaways">
+      <div class="t">Specs before code.</div>
+      <div class="t">Small, single-responsibility units.</div>
+      <div class="t">Gate every phase with a human.</div>
+      <div class="t">Give the AI persistent memory.</div>
+      <div class="t">Bake in write-then-verify.</div>
+      <div class="t">Design seams for AI swap-in.</div>
+    </div>
+    <p class="closing">Direct the agent. <span class="amber">Review at the gates.</span> Ship the whole product.</p>
+  </div>
+  <div class="slide-no"><b>09</b> / 09 · Takeaways</div>
+</section>
+
+<script>
+  // hero telemetry: light dots in sequence
+  (function () {
+    var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var dots = Array.prototype.slice.call(document.querySelectorAll("#dots .dot"));
+    if (reduce) {
+      dots.forEach(function (d) { d.classList.add("lit"); d.style.opacity = 1; });
+      return;
+    }
+    dots.forEach(function (d, i) {
+      d.style.animationDelay = (i * 90) + "ms";
+      setTimeout(function () { d.classList.add("lit"); }, 350 + i * 130);
+    });
+  })();
+
+  // progress bar + slide counter
+  (function () {
+    var cur = document.getElementById("cur");
+    var bar = document.getElementById("progress");
+    var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+    function onScroll() {
+      var h = document.documentElement;
+      var max = h.scrollHeight - h.clientHeight;
+      var pct = max > 0 ? (h.scrollTop / max) * 100 : 0;
+      bar.style.width = pct + "%";
+    }
+    document.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            var n = slides.indexOf(e.target) + 1;
+            cur.textContent = ("0" + n).slice(-2);
+            e.target.querySelectorAll(".reveal").forEach(function (r) { r.classList.add("in"); });
+          }
+        });
+      }, { threshold: 0.5 });
+      slides.forEach(function (s) { io.observe(s); });
+    }
+
+    // keyboard nav
+    function curIndex() {
+      var mid = window.scrollY + window.innerHeight / 2;
+      for (var i = 0; i < slides.length; i++) {
+        if (slides[i].offsetTop <= mid && slides[i].offsetTop + slides[i].offsetHeight > mid) return i;
+      }
+      return 0;
+    }
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "PageDown") {
+        e.preventDefault();
+        var n = Math.min(slides.length - 1, curIndex() + 1);
+        slides[n].scrollIntoView({ behavior: "smooth" });
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "PageUp") {
+        e.preventDefault();
+        var p = Math.max(0, curIndex() - 1);
+        slides[p].scrollIntoView({ behavior: "smooth" });
+      }
+    });
+  })();
+</script>
