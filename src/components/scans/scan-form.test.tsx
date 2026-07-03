@@ -24,9 +24,22 @@ vi.mock('@/lib/image', () => ({
   isHeic: () => false,
 }))
 
+const { push } = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push, refresh: vi.fn() }),
 }))
+
+// Keep the real classify/upload/geocode helpers (the other tests exercise them);
+// stub only the persistence + enrichment side-effects so save resolves offline.
+vi.mock('@/lib/scans-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/scans-client')>()
+  return {
+    ...actual,
+    saveScan: vi.fn(async () => 'GhUrEi67'),
+    shouldTriggerEnrichment: vi.fn(() => false),
+    triggerEnrichment: vi.fn(),
+  }
+})
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -135,6 +148,50 @@ describe('ScanForm — n8n scan-vision prefill', () => {
     const area = (await screen.findByLabelText(/approximate area/i)) as HTMLInputElement
     expect(area.value).toBe('')
     expect(screen.queryByText(/we filled in what we could see/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('ScanForm — save navigation', () => {
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:preview')
+    URL.revokeObjectURL = vi.fn()
+    push.mockClear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('sends a new scan straight to the plan screen (skipping the scan detail page)', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/api/classify-vision')) {
+        return {
+          ok: true,
+          json: async () => ({
+            status: 'ok',
+            fields: { surface: 'gravel', space_type: 'front_garden', sun_exposure: 'partial', area_sqm: 8 },
+            confidence: 0.82,
+          }),
+        }
+      }
+      return { ok: false, json: async () => ({}) }
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    render(<ScanForm userId={USER_ID} scan={null} photoUrl={null} />)
+    pickPhoto()
+
+    // The confident read prefills sun/surface/space/area; add the one remaining
+    // required field (postcode) so the schema validates, then submit.
+    const area = (await screen.findByLabelText(/approximate area/i)) as HTMLInputElement
+    await waitFor(() => expect(area.value).toBe('8'))
+    fireEvent.change(screen.getByLabelText(/postcode/i), { target: { value: '10115' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /show me my plan/i }))
+
+    // Lands on the plan (which auto-builds), NOT the scan detail page.
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/scans/GhUrEi67/plan'))
+    expect(push).not.toHaveBeenCalledWith('/scans/GhUrEi67')
   })
 })
 

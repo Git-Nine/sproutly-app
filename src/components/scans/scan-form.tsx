@@ -220,7 +220,9 @@ export function ScanForm({
         triggerEnrichment(scanId)
       }
 
-      router.push(`/scans/${shortCode}`)
+      // New scan → straight to the plan (it auto-builds there). Editing an
+      // existing scan → back to its detail page.
+      router.push(isEdit ? `/scans/${shortCode}` : `/scans/${shortCode}/plan`)
       router.refresh()
     } catch (err) {
       // Supabase errors are plain objects (PostgrestError/StorageError), not Error
@@ -351,19 +353,18 @@ export function ScanForm({
             {!postcode && (
               <Button
                 type="button"
-                variant="link"
+                variant="outline"
                 size="sm"
-                className="h-auto p-0 text-xs"
                 onClick={locator.locate}
                 disabled={locator.locating}
               >
                 {locator.locating ? (
                   <>
-                    <Loader2 className="mr-1 h-3 w-3 animate-spin" /> Finding your location…
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Finding your location…
                   </>
                 ) : (
                   <>
-                    <MapPin className="mr-1 h-3 w-3" /> Use my location
+                    <MapPin className="mr-1.5 h-4 w-4" /> Use my location
                   </>
                 )}
               </Button>

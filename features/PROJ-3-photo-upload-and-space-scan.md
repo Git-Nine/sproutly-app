@@ -383,6 +383,7 @@ Closes the coverage gap in the existing photo-GPS → postcode auto-fill: that p
 
 - **Tests:** co-located `scan-form.test.tsx` grew by 2 (now 4 total) — asserts clicking "Use my location" reverse-geocodes the device coordinates into the postcode field with the "current location" hint, and that a `PERMISSION_DENIED` error shows a toast, calls no geocode fetch, and leaves the field blank. Full suite **194/194 green**, `tsc` + `npm run lint` clean.
 - **Status:** complete and live-ready — no new env vars, no DB change, no ops steps. Ships on the next push to `main`.
+- **Follow-up (2026-07-03):** on local-preview feedback that the fallback read as easy-to-miss, promoted "Use my location" from a tiny inline `variant="link"` text link to a **prominent outlined button** (`variant="outline"`, normal `size="sm"`, larger icon) so the one-tap postcode path is obvious when a photo has no GPS. Behaviour unchanged (still empty-only, still sets `postcodeTouched`); existing scan-form tests stay green.
 
 ## Post-Deploy Enhancement — 3-step scan wizard matching the prototype (2026-07-02)
 
