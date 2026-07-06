@@ -25,11 +25,14 @@
 | PROJ-8 | Shopping List & Deep Links | Deployed | P0 | PROJ-7 | [PROJ-8](PROJ-8-shopping-list-and-deep-links.md) | 2026-06-17 |
 | PROJ-9 | Progress Photo Log | Roadmap | P1 | PROJ-7 | — | 2026-06-17 |
 | PROJ-10 | In-App Notifications | Planned | P1 | PROJ-5, PROJ-6 | [PROJ-10](PROJ-10-in-app-notifications.md) | 2026-06-22 |
+| PROJ-11 | Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Planned | P1 | PROJ-1, PROJ-5 | [PROJ-11](PROJ-11-plant-catalogue-etl-floraweb.md) | 2026-07-06 |
 
 <!-- Add features above this line -->
 
 ## Build Order
-PROJ-1 → PROJ-2 → PROJ-3 → PROJ-4 → PROJ-5 → PROJ-6 → PROJ-7 → PROJ-8 → PROJ-9 → PROJ-10
+PROJ-1 → PROJ-2 → PROJ-3 → PROJ-4 → PROJ-5 → PROJ-6 → PROJ-7 → PROJ-8 → PROJ-9 → PROJ-10 → PROJ-11
+
+Note: the P0 journey (PROJ-1–8) is deployed and now iterates; P1 features (PROJ-9, PROJ-10, PROJ-11) build on top and are independent of each other. PROJ-11 (catalogue expansion) only needs PROJ-5's table + PROJ-1's seed pattern; it enlarges the palette PROJ-6 plans from, with two PROJ-6 engine changes (consume `moisture`, weight `native`) left as separate follow-ons.
 
 Notes:
 - PROJ-4 (Environmental Enrichment) is split from PROJ-3 (Scan): separate concern, 3 external APIs, and a blocking open question on the BGR endpoint. The scan stores manual-form data on its own; enrichment augments it.
@@ -45,7 +48,7 @@ Notes:
 
 - **PROJ-3 post-deploy enhancement (2026-07-02):** added a **"Use my location" postcode fallback** in `scan-form.tsx` for photos without GPS EXIF (screenshots, EXIF-stripped shares) or when the photo is skipped — reads `navigator.geolocation` and reverse-geocodes it via the existing `/api/geocode` route (no new route, no env var, no DB change). Refactored the geocode call into a shared `geocodeToPostcode()` helper and made the auto-fill hint source-aware (photo vs current location). Co-located `scan-form.test.tsx` +2 tests (now 4); full suite 194/194 green. Frontend-only, live-ready. See PROJ-3 spec → "Post-Deploy Enhancement — Use my location postcode fallback".
 
-- **PROJ-3 post-deploy enhancement (2026-07-02):** wired the **AI scan-vision prefill** (the PRD Scan swap-in point) into `scan-form.tsx` — picking a photo uploads it and calls `POST /api/classify-vision` (n8n + Claude vision), prefilling sun/surface/space_type/area on a confident read with a "Reading your space…" → "we filled these in" flow; degrades silently to the manual form. Backend route + n8n workflow already existed; this is the UI glue. Co-located `scan-form.test.tsx` (2 tests), full suite 192/192 green. **App code only — not yet live:** needs the n8n instance imported + `N8N_CLASSIFY_WEBHOOK_URL`/`N8N_CLASSIFY_SECRET` set in Vercel (see `docs/n8n-scan-vision-workflow.md`). See PROJ-3 spec → "Post-Deploy Enhancement — AI scan-vision prefill, UI wiring".
+- **PROJ-3 post-deploy enhancement (2026-07-02):** wired the **AI scan-vision prefill** (the PRD Scan swap-in point) into `scan-form.tsx` — picking a photo uploads it and calls `POST /api/classify-vision` (n8n + Claude vision), prefilling sun/surface/space_type/area on a confident read with a "Reading your space…" → "we filled these in" flow; degrades silently to the manual form. Backend route + n8n workflow already existed; this is the UI glue. Co-located `scan-form.test.tsx` (2 tests), full suite 192/192 green. **Now live (deployed 2026-07-06):** n8n instance imported + `N8N_CLASSIFY_WEBHOOK_URL`/`N8N_CLASSIFY_SECRET` set in Vercel (see `docs/n8n-scan-vision-workflow.md`); the "Reading your space…" vision prefill runs in production. This is the PRD **Scan** AI swap-in point, now fully realized. See PROJ-3 spec → "Post-Deploy Enhancement — AI scan-vision prefill, UI wiring".
 
 - **PROJ-3 post-deploy enhancement (2026-07-02):** re-shaped `/scans/new` into the prototype's **3-step scan wizard** (`upload → reading → review`, `docs/design-references/screen_02–04.png`) — big "Scan your space" dropzone, a "Reading your space…" interstitial around the AI vision prefill, then a "Here's what we see" review with design-system form-row cards and a "Looks right — show me my plan" CTA. Added a `variant="hero"` to `photo-picker.tsx`; new-scan header now shows the `1/4` step counter + 4-dot journey progress. **Current data model only** — no new orientation/maintenance fields (deferred). Edit mode skips the wizard. Frontend-only, 194/194 green, live-ready. See PROJ-3 spec → "Post-Deploy Enhancement — 3-step scan wizard matching the prototype".
 
@@ -57,4 +60,4 @@ Notes:
 
 - **PROJ-6 post-deploy enhancement (2026-06-29):** added a **survival-constraint guardrail** — `findConstraintViolations()` re-derives from the plan's own snapshot that every recommended plant clears the hard sun/zone/fit filters (independent of `matchingSurvivors`), with a co-located test that both detects tampered lines and runs the engine over the real seed catalogue across a 252-site matrix asserting zero violations. Test-only regression net for "the planner recommends a plant that can't survive this site"; no DB/runtime change. See PROJ-6 spec → "Post-Deploy Enhancement — Survival-constraint guardrail".
 
-## Next Available ID: PROJ-11
+## Next Available ID: PROJ-12

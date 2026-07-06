@@ -30,6 +30,7 @@ Millions replace gardens with gravel and sealed surfaces believing it is the low
 | P0 (MVP) | PROJ-8 Shopping List & Deep Links | Deployed |
 | P1 | PROJ-9 Progress Photo Log | Roadmap |
 | P1 | PROJ-10 In-App Notifications | Planned |
+| P1 | PROJ-11 Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Planned |
 
 See `features/INDEX.md` for dependencies and build order.
 
