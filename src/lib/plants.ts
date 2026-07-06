@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { SUN_OPTIONS, sunLabel, type SunExposure } from '@/lib/scans'
 import { MAINTENANCE_OPTIONS, type MaintenanceLevel } from '@/lib/profile'
 import { SOIL_OPTIONS, type Soil } from '@/lib/soil'
+import { MOISTURE_OPTIONS, type Moisture } from '@/lib/moisture'
 import { optionValues } from '@/lib/utils'
 
 /**
@@ -16,8 +17,22 @@ import { optionValues } from '@/lib/utils'
  * migration creates the public.plants table (same staged flow as PROJ-2/PROJ-3).
  */
 
-export { SUN_OPTIONS, sunLabel, MAINTENANCE_OPTIONS, SOIL_OPTIONS }
-export type { SunExposure, Soil, MaintenanceLevel }
+export { SUN_OPTIONS, sunLabel, MAINTENANCE_OPTIONS, SOIL_OPTIONS, MOISTURE_OPTIONS }
+export type { SunExposure, Soil, MaintenanceLevel, Moisture }
+
+/**
+ * Survival-critical traits (PROJ-11). The AI-inference step attaches a per-field
+ * confidence to exactly these; low confidence on any one blocks a staged row from
+ * being committed until a human resolves it. Also the allowed contents of
+ * `plants.ai_origin_fields`.
+ */
+export const SURVIVAL_CRITICAL_FIELDS = [
+  'sun_tolerance',
+  'soil_compatibility',
+  'moisture',
+  'min_hardiness_zone',
+] as const
+export type SurvivalCriticalField = (typeof SURVIVAL_CRITICAL_FIELDS)[number]
 
 /**
  * Structural planting layers (PROJ-6). Drives the ~60/30/10 layered plan
@@ -65,9 +80,19 @@ export type Plant = {
   native: boolean
   image_url: string | null
   care_notes: string | null
+  // PROJ-11 additions — nullable/defaulted, backward-compatible with the pre-existing rows.
+  moisture: Moisture | null
+  image_attribution: string | null
+  image_license: string | null
+  source: string | null
+  ai_origin_fields: SurvivalCriticalField[] | null
   created_at: string
   updated_at: string | null
 }
+
+export const ATTRIBUTION_MAX = 500
+export const LICENSE_MAX = 100
+export const SOURCE_MAX = 100
 
 export const plantSchema = z.object({
   common_name: z
@@ -119,10 +144,33 @@ export const plantSchema = z.object({
     .trim()
     .max(NOTES_MAX, `Keep notes under ${NOTES_MAX} characters`)
     .optional(),
+  // PROJ-11 additions. Optional so the pre-existing ~40 seed rows and the admin
+  // form (which doesn't yet edit these) keep validating. The import re-validates
+  // moisture as REQUIRED via importPlantSchema before staging/commit.
+  moisture: z.enum(optionValues(MOISTURE_OPTIONS), { message: 'Choose a moisture level' }).optional(),
+  image_attribution: z
+    .string()
+    .trim()
+    .max(ATTRIBUTION_MAX, `Keep attribution under ${ATTRIBUTION_MAX} characters`)
+    .optional(),
+  image_license: z
+    .string()
+    .trim()
+    .max(LICENSE_MAX, `Keep the licence under ${LICENSE_MAX} characters`)
+    .optional(),
+  source: z
+    .string()
+    .trim()
+    .max(SOURCE_MAX, `Keep the source under ${SOURCE_MAX} characters`)
+    .optional(),
+  ai_origin_fields: z.array(z.enum(SURVIVAL_CRITICAL_FIELDS)).optional(),
 })
 export type PlantValues = z.infer<typeof plantSchema>
 
 const SOIL_LABELS = Object.fromEntries(SOIL_OPTIONS.map((o) => [o.value, o.label])) as Record<Soil, string>
+const MOISTURE_LABELS = Object.fromEntries(
+  MOISTURE_OPTIONS.map((o) => [o.value, o.label]),
+) as Record<Moisture, string>
 const MAINTENANCE_LABELS = Object.fromEntries(
   MAINTENANCE_OPTIONS.map((o) => [o.value, o.label]),
 ) as Record<MaintenanceLevel, string>
@@ -135,6 +183,7 @@ const PLANT_TYPE_PLURALS = Object.fromEntries(
 ) as Record<PlantType, string>
 
 export const soilLabel = (v: Soil) => SOIL_LABELS[v] ?? v
+export const moistureLabel = (v: Moisture) => MOISTURE_LABELS[v] ?? v
 export const maintenanceLabel = (v: MaintenanceLevel) => MAINTENANCE_LABELS[v] ?? v
 export const plantTypeLabel = (v: PlantType) => PLANT_TYPE_LABELS[v] ?? v
 export const plantTypePlural = (v: PlantType) => PLANT_TYPE_PLURALS[v] ?? v

@@ -16,6 +16,7 @@
     "seed:plants": "node --env-file=.env.local scripts/seed-plants.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -53,6 +54,7 @@
     "react-hook-form": "^7.71.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.2.0",
+    "yaml": "^2.9.0",
     "zod": "^4.3.5"
   },
   "devDependencies": {
