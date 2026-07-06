@@ -25,7 +25,7 @@
 | PROJ-8 | Shopping List & Deep Links | Deployed | P0 | PROJ-7 | [PROJ-8](PROJ-8-shopping-list-and-deep-links.md) | 2026-06-17 |
 | PROJ-9 | Progress Photo Log | Roadmap | P1 | PROJ-7 | — | 2026-06-17 |
 | PROJ-10 | In-App Notifications | Planned | P1 | PROJ-5, PROJ-6 | [PROJ-10](PROJ-10-in-app-notifications.md) | 2026-06-22 |
-| PROJ-11 | Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Planned | P1 | PROJ-1, PROJ-5 | [PROJ-11](PROJ-11-plant-catalogue-etl-floraweb.md) | 2026-07-06 |
+| PROJ-11 | Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Architected | P1 | PROJ-1, PROJ-5 | [PROJ-11](PROJ-11-plant-catalogue-etl-floraweb.md) | 2026-07-06 |
 
 <!-- Add features above this line -->
 

@@ -1,13 +1,16 @@
 # PROJ-11: Expand Plant Catalogue via FloraWeb/BfN ETL with AI-Assisted Trait Mapping
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-07-06
 **Last Updated:** 2026-07-06
 
 ## Summary
 A one-time (repeatable-by-hand) offline import pipeline that grows the plant catalogue
-well beyond the ~40 hand-seeded rows. FloraWeb/BfN defines **which** species belong in
-the German catalogue and their **native status** (authoritative). An AI step infers the
+well beyond the ~40 hand-seeded rows. An **open-data stack** (GBIF + POWO/WCVP + World
+Flora Online + Wikidata — all commercially reusable) defines **which** species belong in
+the German catalogue and their **native status**; FloraWeb/BfN, whose data is not openly
+licensed, is demoted to an optional curator cross-reference only *(source strategy set in
+/architecture, 2026-07-06 — see Tech Design)*. An AI step infers the
 horticultural traits the sources don't reliably express (sun, soil, moisture, mature size,
 maintenance, hardiness zone, care notes), tagged with a confidence signal. A curator
 reviews a human-readable **staging file** — correcting and approving the survival-critical
@@ -154,20 +157,34 @@ upsert on `latin_name`) rather than replacing it.
 
 ## Open Questions
 <!-- Unresolved; close in /refine or /architecture when answered. -->
-- [ ] **FloraWeb/BfN access + license (gating):** exact access method (documented API vs. bulk
-      download vs. structured pages) and the license terms for redistributing *derived* data
-      (species list + native status) in a commercial product. Needs verification before build.
-- [ ] Does FloraWeb expose a clean filter for "orderable / ornamental / garden-suitable," or must the
-      selection filter be AI-assisted / manually curated from the raw flora list?
-- [ ] Provenance granularity: row-level `source` only, or per-field AI-origin flags? (Architecture.)
-- [ ] Which Claude model + prompt strategy for trait inference, and how confidence is derived/
-      thresholded. (Architecture.)
-- [ ] `moisture` vocabulary — the exact bucket set (e.g. dry / moist / wet) and how it aligns with the
-      existing soil buckets. (Architecture, with PROJ-6 in mind.)
-- [ ] Where image attribution surfaces in the UI (plant card, plan view) — likely a small PROJ-6/
-      PROJ-7 follow-on.
-- [ ] Confirm invasive/neophyte exclusion list source (e.g. BfN Neophyten / Unionsliste) for the
-      "non-invasive ornamentals" filter.
+- [x] **Source + licensing — RESOLVED (FloraWeb licensing block removed):** the design now leads with
+      an **open-data stack** — GBIF (CC0/CC-BY datasets) for the German species list + native status,
+      POWO/WCVP (CC-BY) for native range, WFO (CC0) for names, Wikidata (CC0) for German common names.
+      All permit commercial redistribution of derived data with attribution, so FloraWeb (non-open) is
+      demoted to an optional curator cross-reference and is never shipped. See Technical Decisions.
+- [ ] **Per-dataset licence check (small, mechanical — before commit):** GBIF/Catalogue of Life licences
+      are set per dataset, not globally, and a German checklist mirrored there can be CC-BY-NC or trace
+      back to a restricted source. The importer must filter to CC0/CC-BY and record each row's source
+      dataset + licence. This replaces the former gating BfN-permission question.
+- [x] **Garden-suitable filter — RESOLVED:** no source has a reliable "orderable/ornamental" flag, so
+      selection is a **curated allowlist + rule-based exclusions** (native status, habitat, invasive
+      lists), not a single-source query.
+- [x] **Gardening traits are not in any open source — RESOLVED:** confirmed across GBIF, POWO, WFO,
+      Wikidata, GermanSL, BiolFlor, TRY, LEDA, GIFT and USDA — none carry sun/garden-soil/moisture/
+      mature-size/hardiness/care-notes. AI inference (or a commercial source like RHS) is the only
+      path; the open stack supplies names + native status only.
+- [x] **Provenance granularity — RESOLVED:** **per-field AI-origin flags** for the survival-critical
+      traits, plus a row-level `source` marker.
+- [x] **Model + prompt + confidence — RESOLVED:** `claude-opus-4-8` via the Anthropic SDK, structured
+      outputs constrained to `plantSchema`, with a **per-field confidence** signal; low confidence on
+      any survival-critical field → mandatory review, blocks commit until resolved.
+- [x] **`moisture` vocabulary — RESOLVED:** `dry` / `moist` / `wet` (three buckets), a field of its
+      own separate from soil; aligns with FloraWeb/BiolFlor Ellenberg moisture (F) values.
+- [x] **Invasive-exclusion source — RESOLVED:** EU Unionsliste (Reg. 1143/2014, current via
+      Implementing Reg. 2025/1422 — reusable as an EU official work) + BfN Neobiota national lists,
+      cross-checked with FloraWeb floristic status (exclude non-`I`).
+- [ ] Where image attribution surfaces in the UI (plant card, plan view) — a small PROJ-6/PROJ-7
+      display-side follow-on, out of scope for this data/pipeline feature.
 
 ## Decision Log
 
@@ -190,13 +207,182 @@ upsert on `latin_name`) rather than replacing it.
 <!-- Added by /architecture -->
 | Decision | Rationale | Date |
 |----------|-----------|------|
-| _To be added by /architecture_ | | |
+| Two offline Node scripts extending the `seed:plants` pattern (`import:plants` → stage, `import:plants:commit` → commit), not a new app surface | Reuses the proven server-side, service-role, idempotent-upsert model; no RLS/UI/route work; keeps the human review gate outside the app entirely | 2026-07-06 |
+| **Primary source stack = openly-licensed data, NOT FloraWeb:** GBIF (filtered to CC0/CC-BY datasets) for the German species list + native/introduced status, cross-checked with POWO/WCVP (Kew, CC-BY) for native range, with World Flora Online (CC0) as the name/taxonomy backbone | These sources permit **commercial redistribution of derived data with attribution** — which FloraWeb does not. Leading with them turns the FloraWeb licensing block from a gating risk into a non-issue for the species list + native status. All three have real APIs / bulk downloads and are machine-readable | 2026-07-06 |
+| Native status derived from POWO/WCVP native-vs-introduced range (Germany is a distribution unit) + GBIF `establishmentMeans`, normalized to the boolean `plants.native` | POWO gives authoritative native range at country resolution under a clean CC-BY licence; GBIF's per-record establishment flag corroborates it. Both are commercially reusable, unlike FloraWeb's `Floristischer Status` | 2026-07-06 |
+| German common names enriched from Wikidata (CC0) | Wikidata is fully commercially reusable and carries German vernacular names (property P1843); it fills the common-name column without any licensing concern | 2026-07-06 |
+| FloraWeb / GermanSL / BiolFlor kept only as an **optional, non-redistributed cross-reference** for a curator during review — never the shipped source | Their German coverage is excellent but their licences are restrictive/unverified (FloraWeb: consent required; GermanSL/BiolFlor: no clear commercial licence; BiolFlor also went offline ~Sept 2024). Consulting them to sanity-check a value is fine; redistributing their data is not | 2026-07-06 |
+| **Per-dataset licence check is mandatory** on every GBIF/Catalogue of Life pull before commit | GBIF and CoL licences are per-dataset/per-sector, not global — a German checklist mirrored there may itself be CC-BY-NC or trace back to BfN. The importer must filter to CC0/CC-BY and record each row's source dataset + licence | 2026-07-06 |
+| No open source carries gardening traits — confirmed across GBIF, POWO, WFO, Wikidata, GermanSL, BiolFlor, TRY, LEDA, GIFT, USDA | Validates the core design bet: sun/garden-soil/moisture/mature-size/hardiness/care-notes must be AI-inferred (or bought from a commercial horticultural source like RHS); the open stack supplies only names + native status | 2026-07-06 |
+| Invasive-exclusion list: EU Unionsliste (Reg. 1143/2014, current via Implementing Reg. 2025/1422) is reusable as an EU official work; BfN Neobiota national lists supplement it | The EU list is legally binding and, as official EU legislation, is freely reusable — so it can be redistributed/embedded without a licensing concern; BfN's broader national lists catch invasives beyond the EU set | 2026-07-06 |
+| Selection filter = rule-based exclusions (status + habitat) over a curated allowlist, not a native "garden-suitable" flag | FloraWeb has no "ornamental/orderable" attribute; garden-suitability must be curated. Excludes aquatics, grasses, weeds, protected and invasive species; includes natives + curated non-invasive ornamentals | 2026-07-06 |
+| Invasive exclusion sourced from the EU Unionsliste (Reg. 1143/2014) + BfN neophyte/management lists, cross-checked with FloraWeb's own native-status field | These are the authoritative German/EU invasive-species references; combining them with FloraWeb's `Status` (indigen/Archäophyt/Neophyt) gives a defensible non-invasive filter | 2026-07-06 |
+| AI trait inference = one Claude call per species via the Anthropic SDK, using **structured outputs** constrained to a schema mirroring `plantSchema` | Forcing the model to emit only vocabulary-valid values (sun/soil/moisture buckets, whole-number zone, sizes in cm, maintenance, plant_type) means out-of-vocabulary traits are rejected at the source, not silently written | 2026-07-06 |
+| Model: `claude-opus-4-8`; the model returns a per-field confidence signal for the survival-critical traits | Careful, vocabulary-locked inference over survival-critical fields warrants the most capable default model; per-field confidence (not one row-level score) is what drives the mandatory-review gate | 2026-07-06 |
+| FloraWeb/BiolFlor Ellenberg indicator values (light L, moisture F) fed to the AI as grounding for sun and moisture | These ecological values are authoritative and directly relevant to two survival-critical traits, raising inference confidence and giving a cross-check against the AI's guess | 2026-07-06 |
+| Provenance granularity: **per-field AI-origin flags** for the survival-critical traits, plus a row-level `source` marker | Resolves the open question — knowing exactly which of sun/soil/moisture/zone is still an AI guess vs. human-corrected is what enables targeted future re-verification; a row-level flag alone loses that | 2026-07-06 |
+| `moisture` vocabulary = `dry` / `moist` / `wet` (three buckets), stored as its own field separate from soil | Dry-vs-wet shade is a real survival distinction the soil buckets don't capture; three buckets align cleanly with Ellenberg F and keep the field simple for the later PROJ-6 wiring | 2026-07-06 |
+| Staging file = a single human-readable YAML file (identity, native, AI traits, per-field confidence, review flags, `approved` flag, source) | YAML lets a curator read inline confidence/flags, edit values, add comments, and flip `approved: true` per row in one file — more ergonomic for survival-critical review than CSV/JSON; adds one small parser dependency | 2026-07-06 |
+| Commit is idempotent: upsert on `latin_name`, ON CONFLICT DO NOTHING; only `approved: true` rows; re-validate every field server-side; partial commit is safe and reported | Inherits the existing seed idempotency contract so re-runs never duplicate or clobber admin edits; per-row validation + reporting means one bad hand-edit skips its row, not the whole batch | 2026-07-06 |
+| New schema columns are additive and nullable/defaulted (`moisture`, `image_attribution`, `image_license`, `source`, `ai_origin_fields`) | The existing ~40 rows and all PROJ-5/PROJ-6 reads keep working unchanged; the migration backfills nothing and breaks nothing | 2026-07-06 |
+| New dependency `@anthropic-ai/sdk` + `ANTHROPIC_API_KEY` env var; runs server-side only | The AI step needs the SDK and a key; the key is a build-time/curator-machine secret, never shipped to the browser, same trust boundary as `SUPABASE_SERVICE_ROLE_KEY` | 2026-07-06 |
 
 ---
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### In one sentence
+Two offline command-line steps — **stage** and **commit** — grow the plant catalogue: the first pulls
+a filtered set of German species from FloraWeb, has AI fill in the gardening traits FloraWeb doesn't
+carry, and writes a reviewable file; a curator checks and approves rows in that file; the second commits
+only approved rows into the live catalogue. There is **no new screen and no new page** — the whole
+feature is machinery a curator runs, plus a few new columns on the existing plants table.
+
+### Why there's no UI
+The spec deliberately keeps unreviewed species out of the live catalogue and off any screen. The review
+happens in a plain file on the curator's machine, and corrections after commit use the **existing**
+`/admin/plants` interface. So this feature adds no components, no API routes, and no RLS policies — it
+extends the same offline `npm run seed:plants` pattern the catalogue was first built with.
+
+### The pipeline (what runs, in order)
+
+```
+STEP 1 — Import & stage        (curator runs:  npm run import:plants)
+  1. Pull candidate species from the open-data stack
+     - GBIF (CC0/CC-BY datasets) → German species list + native status
+     - POWO/WCVP (CC-BY)          → confirm native-vs-introduced range
+     - World Flora Online (CC0)   → normalize names / taxonomy
+     - Wikidata (CC0)             → German common names
+     (all commercially reusable; FloraWeb is only a curator cross-reference)
+  2. Apply the selection filter
+     - EXCLUDE: aquatics, pasture grasses, agricultural weeds,
+       protected species, and invasive species (EU Union list + BfN lists)
+     - INCLUDE: natives + a curated set of non-invasive ornamentals
+  3. Check each candidate against the live catalogue (by Latin name)
+     - already present  → mark as "existing / conflict", never auto-overwrite
+  4. AI trait inference (one Claude call per species)
+     - fills the traits FloraWeb lacks: sun, soil, moisture, mature size,
+       maintenance, hardiness zone, care notes
+     - returns a confidence signal per survival-critical trait
+     - grounded with FloraWeb's ecological light/moisture values
+  5. Validate every value against the app's plant vocabulary
+     - anything outside the allowed buckets is rejected/flagged, never written
+  6. Write the staging file
+     - natives listed first
+     - low-confidence survival-critical fields flagged "must review"
+
+          ⇩   CURATOR opens the staging file, corrects survival-critical
+              fields, and sets  approved: true  on the rows they trust
+
+STEP 2 — Commit                (curator runs:  npm run import:plants:commit)
+  1. Read the staging file; take only rows marked approved
+  2. Re-validate every field against the plant vocabulary (server-side)
+  3. Add to the catalogue: insert by Latin name; if the plant already
+     exists, skip it (never clobber an admin's edits)
+  4. Record where each plant came from + which traits are still AI-guessed
+  5. Print a report: inserted / skipped-as-existing / rejected (with reasons)
+```
+
+The two steps are separate on purpose: **nothing an AI guessed reaches a real user's plan until a human
+has approved it.** That human gate is the whole point — the traits being inferred (does this plant
+survive in shade? in wet soil?) are the ones that decide whether a recommended plant lives or dies.
+
+### Where the species list + native status come from
+Research compared the open sources and settled the source strategy:
+- **The species list, names, and native status come from openly-licensed data** — GBIF (using only its
+  CC0/CC-BY datasets) for the German species list and native/introduced flag, cross-checked against
+  POWO/WCVP (Kew, CC-BY) for native range, with World Flora Online (CC0) normalizing the names and
+  Wikidata (CC0) supplying German common names. **All of these permit commercial redistribution of the
+  derived data with attribution** — which is the crucial difference from FloraWeb.
+- **FloraWeb / GermanSL / BiolFlor are kept only as an optional cross-reference** a curator can consult
+  during review — their German coverage is excellent, but their licences are restrictive or unverified,
+  so their data is never shipped.
+- **No open source — German or otherwise — provides gardening traits** (sun tolerance, garden
+  soil/moisture needs, mature size, hardiness zone, care notes). Every source checked stops at
+  ecological/wild-habitat data. That gap is exactly what the AI step fills, and confirms the design's
+  central bet.
+
+> **Per-dataset licence check is mandatory.** GBIF and Catalogue of Life licences are set per dataset,
+> not globally — a German checklist mirrored there could itself be non-commercial or trace back to a
+> restricted source. The importer filters to CC0/CC-BY and records each row's source dataset + licence.
+
+> **Review guidance (for the curator and `/qa`).** GBIF's German native-status coverage is
+> **heterogeneous** — it aggregates many checklists of differing quality, some tracing back to BfN. So
+> the `native` flag is *not* fully settled by the import the way a single authoritative source would
+> settle it; treat it as a value that needs the same curator attention as the survival-critical AI
+> traits. Two implications: (1) cross-checking against POWO/WCVP native range is what raises confidence
+> in the flag, and consulting FloraWeb's `Floristischer Status` as an (unshipped) cross-reference is
+> worthwhile when the two disagree; (2) the first review session should budget for verifying native
+> status, not just the AI-inferred gardening traits.
+
+### Data model changes (plain language)
+All additions are **backward-compatible** — the ~40 existing rows and every current read keep working
+unchanged. Each plant gains:
+
+```
+Each plant now also records:
+- Water needs        — dry, moist, or wet   (populated by the import; new)
+- Image credit       — who to attribute the photo to (for CC-licensed images)
+- Image license      — the licence the photo is under
+- Source             — where this row came from (e.g. hand-seeded vs. FloraWeb import)
+- AI-origin traits   — which survival-critical fields are still an AI guess
+                       vs. corrected by a human
+```
+
+The **staging file** (the curator's working document) holds, per species:
+
+```
+- Species identity (Latin + common name) and native status   [from FloraWeb]
+- AI-inferred traits (sun, soil, water, size, maintenance, zone, notes)
+- A confidence signal on the survival-critical traits
+- A "must review" flag where confidence is low
+- An "approved" flag the curator flips to true
+- A source marker
+```
+
+### Key technical choices, in brief (the "why", not the "how")
+- **Two offline scripts, not an app feature.** Reuses the existing safe, server-side seed model; keeps
+  the review outside the app entirely. No new screens, routes, or database security rules.
+- **AI fills only the missing gardening traits.** The open-data stack is authoritative on *which*
+  species and *native vs. not*; the AI never overrides those. It only infers the horticultural traits
+  no open source (German or otherwise) reliably carries — which is also what sidesteps the licensing
+  block on buying a trait database.
+- **The AI is boxed into the app's own vocabulary.** It can only return values the app already
+  understands (the same sun/soil/water/size/zone/maintenance choices the admin form uses), so a
+  nonsensical or out-of-vocabulary trait is rejected at the source rather than silently stored.
+- **Confidence gates the survival-critical fields.** If the AI is unsure about sun, soil, water, or
+  hardiness for a species, that row cannot be committed until a human resolves it.
+- **Provenance is tracked per field.** Each committed plant records not just "came from the import" but
+  *which* survival traits are still AI guesses — so they can be re-verified later without re-checking
+  everything.
+- **Re-running is always safe.** Commit adds new species by Latin name and skips any that already
+  exist, so it never creates duplicates and never overwrites a correction an admin made in
+  `/admin/plants`.
+- **Images stay external URLs** (as today); this feature only stores the attribution/licence alongside
+  them, for a later display-side follow-on.
+
+### New dependencies & configuration
+- **`@anthropic-ai/sdk`** — the Anthropic client for the AI trait-inference step (new; not currently
+  installed).
+- **A small file parser** for the human-readable staging file (a YAML reader).
+- **`ANTHROPIC_API_KEY`** — new environment variable, needed only on the curator's machine when running
+  the import. Like the existing service-role key, it is a server-side secret and never reaches the
+  browser. To be documented in `.env.local.example`.
+- Reuses the existing `@supabase/supabase-js` client and `SUPABASE_SERVICE_ROLE_KEY`.
+
+### Downstream note (out of scope here, flagged for PROJ-6)
+This feature *adds and populates* the new `water needs` field and *records* the native flag honestly and
+surfaces natives first — but wiring `water needs` into the plan engine's survival filter, and weighting
+natives in plant selection, are separate PROJ-6 enhancements, not part of this work.
+
+### The one thing to confirm before building
+Leading with the open-data stack **removes the FloraWeb licensing block** as a gating risk: GBIF
+(CC0/CC-BY), POWO/WCVP (CC-BY), WFO and Wikidata (CC0) all permit commercial redistribution of derived
+data with attribution, the AI infers the traits, and the invasive lists are freely-reusable EU/BfN
+sources. What remains is a smaller, mechanical check rather than a legal negotiation: **the importer
+must verify each GBIF/CoL dataset's licence per pull** (they are set per dataset, not globally) and
+filter to CC0/CC-BY, recording each row's source and licence. See Open Questions.
 
 ## QA Test Results
 _To be added by /qa_
