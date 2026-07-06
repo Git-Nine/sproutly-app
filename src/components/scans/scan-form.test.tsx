@@ -200,7 +200,7 @@ describe('ScanForm — "Use my location" postcode fallback', () => {
     vi.restoreAllMocks()
   })
 
-  it('reverse-geocodes the device location into the postcode field', async () => {
+  it('auto-fills the postcode from the device location on the review step — no tap', async () => {
     const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       if (String(url).includes('/api/geocode')) {
         return { ok: true, json: async () => ({ postcode: '10115' }) }
@@ -217,7 +217,10 @@ describe('ScanForm — "Use my location" postcode fallback', () => {
 
     render(<ScanForm userId={USER_ID} scan={null} photoUrl={null} />)
     skipPhoto()
-    fireEvent.click(screen.getByRole('button', { name: /use my location/i }))
+
+    // Reaching the review step with an empty postcode fires the location attempt
+    // itself — no "Use my location" tap needed.
+    await waitFor(() => expect(getCurrentPosition).toHaveBeenCalledTimes(1))
 
     // It reverse-geocodes the device coordinates...
     await waitFor(() =>
@@ -244,11 +247,41 @@ describe('ScanForm — "Use my location" postcode fallback', () => {
 
     render(<ScanForm userId={USER_ID} scan={null} photoUrl={null} />)
     skipPhoto()
+    // The automatic attempt on the review step denies silently (no toast); the
+    // button stays because the postcode is still empty. Tapping it is explicit,
+    // so THIS denial surfaces a toast.
     fireEvent.click(screen.getByRole('button', { name: /use my location/i }))
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/permission denied/i)))
     expect(fetchMock).not.toHaveBeenCalled()
     const postcode = screen.getByLabelText(/postcode/i) as HTMLInputElement
     expect(postcode.value).toBe('')
+  })
+})
+
+describe('ScanForm — remembered postcode (defaultPostcode)', () => {
+  beforeEach(() => {
+    URL.createObjectURL = vi.fn(() => 'blob:preview')
+    URL.revokeObjectURL = vi.fn()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('pre-fills a remembered postcode and labels it as from the last space', async () => {
+    // A remembered value is present, so the automatic location attempt must NOT
+    // fire (the field is already filled).
+    const getCurrentPosition = vi.fn()
+    vi.stubGlobal('navigator', { geolocation: { getCurrentPosition } })
+
+    render(<ScanForm userId={USER_ID} scan={null} photoUrl={null} defaultPostcode="50667" />)
+    skipPhoto()
+
+    const postcode = (await screen.findByLabelText(/postcode/i)) as HTMLInputElement
+    expect(postcode.value).toBe('50667')
+    expect(screen.getByText(/from your last space/i)).toBeInTheDocument()
+    expect(getCurrentPosition).not.toHaveBeenCalled()
   })
 })

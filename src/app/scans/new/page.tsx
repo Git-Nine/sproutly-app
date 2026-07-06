@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
+import { ProfileLink } from '@/components/brand/profile-link'
 import { ScanForm } from '@/components/scans/scan-form'
 
 export default async function NewScanPage() {
@@ -13,6 +14,17 @@ export default async function NewScanPage() {
 
   if (!user) redirect('/login?returnTo=/scans/new')
 
+  // Remember the postcode from this user's most recent scan and pre-fill it —
+  // people usually scan the same property, so this saves re-entry. RLS scopes
+  // the query to the current user; tolerate the table not existing yet.
+  const { data: lastScan } = await supabase
+    .from('scans')
+    .select('postcode')
+    .not('postcode', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ postcode: string | null }>()
+
   return (
     <div className="min-h-screen bg-background">
       <header className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-4">
@@ -20,7 +32,7 @@ export default async function NewScanPage() {
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
         <Logo href={null} />
-        <span className="text-sm tabular-nums text-muted-foreground">1/4</span>
+        <ProfileLink />
       </header>
 
       {/* Journey progress: Scan → Plan → Order → Grow (Scan is active). */}
@@ -36,7 +48,7 @@ export default async function NewScanPage() {
       </div>
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-6">
-        <ScanForm userId={user.id} scan={null} photoUrl={null} />
+        <ScanForm userId={user.id} scan={null} photoUrl={null} defaultPostcode={lastScan?.postcode ?? null} />
       </main>
     </div>
   )

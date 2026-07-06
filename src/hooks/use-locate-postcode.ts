@@ -13,9 +13,15 @@ import { geocodeToPostcode } from '@/lib/scans-client'
 export function useLocatePostcode(onFound: (postcode: string) => void) {
   const [locating, setLocating] = useState(false)
 
-  function locate() {
+  /**
+   * @param opts.silent — suppress every error toast. Used for the automatic
+   *   on-review-step attempt (the user didn't tap the button, so a failure or a
+   *   denied permission must degrade quietly to manual entry).
+   */
+  function locate(opts?: { silent?: boolean }) {
+    const silent = opts?.silent ?? false
     if (!('geolocation' in navigator)) {
-      toast.error("Location isn't available on this device. Please enter your postcode.")
+      if (!silent) toast.error("Location isn't available on this device. Please enter your postcode.")
       return
     }
     setLocating(true)
@@ -24,17 +30,19 @@ export function useLocatePostcode(onFound: (postcode: string) => void) {
         const pc = await geocodeToPostcode(pos.coords.latitude, pos.coords.longitude)
         if (pc) {
           onFound(pc)
-        } else {
+        } else if (!silent) {
           toast.error("We couldn't find a German postcode for your location. Please enter it manually.")
         }
         setLocating(false)
       },
       (err) => {
-        toast.error(
-          err.code === err.PERMISSION_DENIED
-            ? 'Location permission denied. Please enter your postcode manually.'
-            : "We couldn't get your location. Please enter your postcode manually.",
-        )
+        if (!silent) {
+          toast.error(
+            err.code === err.PERMISSION_DENIED
+              ? 'Location permission denied. Please enter your postcode manually.'
+              : "We couldn't get your location. Please enter your postcode manually.",
+          )
+        }
         setLocating(false)
       },
       { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 },
