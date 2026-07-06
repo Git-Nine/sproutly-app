@@ -25,6 +25,9 @@ export function LoginForm({
 }) {
   const supabase = createClient()
   const [sentTo, setSentTo] = useState<string | null>(null)
+  // Stays true from a successful verify until the browser actually navigates
+  // away, so the spinner doesn't flicker off while the next page loads.
+  const [redirecting, setRedirecting] = useState(false)
 
   const emailForm = useForm<EmailValues>({
     resolver: zodResolver(emailSchema),
@@ -67,6 +70,7 @@ export function LoginForm({
       }
       // Full reload so the new session cookie is picked up by the server everywhere.
       // Re-sanitize at the redirect site (defense-in-depth against open redirect).
+      setRedirecting(true)
       window.location.href = safeReturnTo(returnTo)
     } catch (err) {
       console.error('[auth] verifyOtp threw', err)
@@ -153,8 +157,12 @@ export function LoginForm({
                   <p className="text-sm text-destructive">{otpForm.formState.errors.token.message}</p>
                 )}
               </div>
-              <Button type="submit" className="w-full" disabled={otpForm.formState.isSubmitting}>
-                {otpForm.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify & continue'}
+              <Button type="submit" className="w-full" disabled={otpForm.formState.isSubmitting || redirecting}>
+                {otpForm.formState.isSubmitting || redirecting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  'Verify & continue'
+                )}
               </Button>
             </form>
 
