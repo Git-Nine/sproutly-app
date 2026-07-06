@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
+import { ProfileLink } from '@/components/brand/profile-link'
 import { ScanForm } from '@/components/scans/scan-form'
 
 export default async function NewScanPage() {
@@ -31,7 +32,7 @@ export default async function NewScanPage() {
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
         <Logo href={null} />
-        <span className="text-sm tabular-nums text-muted-foreground">1/4</span>
+        <ProfileLink />
       </header>
 
       {/* Journey progress: Scan → Plan → Order → Grow (Scan is active). */}
