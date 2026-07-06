@@ -51,7 +51,7 @@ import {
 type Errors = Partial<Record<'photo' | 'name' | 'postcode' | 'sun_exposure' | 'surface' | 'space_type' | 'area_sqm', string>>
 
 /** Where an auto-filled postcode came from — drives the "edit if needed" hint. */
-type AutofillSource = 'photo' | 'location' | null
+type AutofillSource = 'photo' | 'location' | 'remembered' | null
 
 /**
  * The scan wizard steps, mirroring the prototype flow:
@@ -70,12 +70,19 @@ export function ScanForm({
   userId,
   scan,
   photoUrl,
+  defaultPostcode = null,
 }: {
   userId: string
   /** Existing scan when editing; null for a new scan. */
   scan: Scan | null
   /** Signed URL of the existing photo (edit mode). */
   photoUrl: string | null
+  /**
+   * Postcode remembered from the user's most recent scan, pre-filled on a new
+   * scan (they usually scan the same property). Ignored in edit mode, where the
+   * scan's own postcode wins.
+   */
+  defaultPostcode?: string | null
 }) {
   const supabase = createClient()
   const router = useRouter()
@@ -95,9 +102,14 @@ export function ScanForm({
   const [previewUrl, setPreviewUrl] = useState<string | null>(photoUrl)
   const [showPhotoEditor, setShowPhotoEditor] = useState(false)
   const [name, setName] = useState(scan?.name ?? '')
-  const [postcode, setPostcode] = useState(scan?.postcode ?? '')
+  // A remembered postcode (from the last scan) pre-fills but stays "untouched",
+  // so a geotagged photo can still correct it to this space's real location and
+  // the auto-locate effect below knows the user hasn't typed one yet.
+  const [postcode, setPostcode] = useState(scan?.postcode ?? defaultPostcode ?? '')
   const [postcodeTouched, setPostcodeTouched] = useState(Boolean(scan?.postcode))
-  const [autofillSource, setAutofillSource] = useState<AutofillSource>(null)
+  const [autofillSource, setAutofillSource] = useState<AutofillSource>(
+    !scan && defaultPostcode ? 'remembered' : null,
+  )
   const [sun, setSun] = useState<string>(scan?.sun_exposure ?? '')
   const [surface, setSurface] = useState<string>(scan?.surface ?? '')
   const [spaceType, setSpaceType] = useState<string>(scan?.space_type ?? '')
@@ -112,6 +124,7 @@ export function ScanForm({
     setAutofillSource('location')
     setErrors((e) => ({ ...e, postcode: undefined }))
   })
+  const [autoLocateTried, setAutoLocateTried] = useState(false)
 
   // Keep a local preview for the picked file (reading + review steps). HEIC can't be
   // rendered by the browser, so it falls back to the "no preview" placeholder.
@@ -125,6 +138,18 @@ export function ScanForm({
     setPreviewUrl(url)
     return () => URL.revokeObjectURL(url)
   }, [file])
+
+  // On reaching the review step for a NEW scan with no postcode yet (nothing
+  // remembered, no photo GPS), quietly try the device location once. Silent: an
+  // attempt the user didn't ask for must not raise error toasts if denied — the
+  // "Use my location" button and manual entry remain. Fires the permission
+  // prompt at most once per mount.
+  useEffect(() => {
+    if (isEdit || step !== 'review' || autoLocateTried) return
+    if (postcode || postcodeTouched) return
+    setAutoLocateTried(true)
+    locator.locate({ silent: true })
+  }, [isEdit, step, autoLocateTried, postcode, postcodeTouched, locator])
 
   async function handlePhoto(picked: File | null, pickedExif: PhotoExif | null) {
     setFile(picked)
@@ -355,7 +380,7 @@ export function ScanForm({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={locator.locate}
+                onClick={() => locator.locate()}
                 disabled={locator.locating}
               >
                 {locator.locating ? (
@@ -373,7 +398,9 @@ export function ScanForm({
               <span className="text-xs text-accent">
                 {autofillSource === 'photo'
                   ? "Filled from your photo's location"
-                  : 'Filled from your current location'}{' '}
+                  : autofillSource === 'location'
+                    ? 'Filled from your current location'
+                    : 'From your last space'}{' '}
                 — edit if needed
               </span>
             )}

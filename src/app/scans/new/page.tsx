@@ -13,6 +13,17 @@ export default async function NewScanPage() {
 
   if (!user) redirect('/login?returnTo=/scans/new')
 
+  // Remember the postcode from this user's most recent scan and pre-fill it —
+  // people usually scan the same property, so this saves re-entry. RLS scopes
+  // the query to the current user; tolerate the table not existing yet.
+  const { data: lastScan } = await supabase
+    .from('scans')
+    .select('postcode')
+    .not('postcode', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ postcode: string | null }>()
+
   return (
     <div className="min-h-screen bg-background">
       <header className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-4">
@@ -36,7 +47,7 @@ export default async function NewScanPage() {
       </div>
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-6">
-        <ScanForm userId={user.id} scan={null} photoUrl={null} />
+        <ScanForm userId={user.id} scan={null} photoUrl={null} defaultPostcode={lastScan?.postcode ?? null} />
       </main>
     </div>
   )
