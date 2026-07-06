@@ -51,7 +51,7 @@ describe('PlanConditions', () => {
           soil_status: 'success',
           soil_type: 'loam',
           zone_status: 'success',
-          hardiness_zone: 7,
+          hardiness_zone: '7',
         })}
       />,
     )
