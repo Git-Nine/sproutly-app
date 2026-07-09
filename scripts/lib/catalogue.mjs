@@ -177,6 +177,56 @@ export function toPlantRow(staged) {
  * skipped even if approved — commit never clobbers an admin's edit (ON CONFLICT DO
  * NOTHING is the DB-side belt-and-suspenders).
  */
+/** Fields the sync step is allowed to correct on an already-existing, ETL-owned row.
+ *  Deliberately narrow — a curator correction pass (e.g. common_name fixed against
+ *  naturadb.de), not a blanket re-sync of every field. */
+export const SYNCABLE_FIELDS = ['common_name']
+
+/**
+ * Decide, per staged row, what sync should UPDATE on already-existing rows — without
+ * touching the database. Mirrors planCommit's shape but for the opposite case: rows
+ * that already exist and need a curator correction pushed in. A row is only eligible
+ * when it is approved, exists live, that live row was created by this ETL
+ * (source === IMPORT_SOURCE — never a hand-seeded or admin-authored row, so a manual
+ * edit made outside this pipeline can never be clobbered), and at least one syncable
+ * field actually differs from the live value.
+ */
+export function planSync(rows, existingRows) {
+  const existingByLatin = new Map(existingRows.map((r) => [r.latin_name, r]))
+  const toUpdate = []
+  const skippedUnapproved = []
+  const skippedNotFound = []
+  const skippedNotEtlOwned = []
+  const skippedNoChange = []
+
+  for (const row of rows) {
+    if (!row.approved) {
+      skippedUnapproved.push(row.latin_name)
+      continue
+    }
+    const existing = existingByLatin.get(row.latin_name)
+    if (!existing) {
+      skippedNotFound.push(row.latin_name)
+      continue
+    }
+    if (existing.source !== IMPORT_SOURCE) {
+      skippedNotEtlOwned.push(row.latin_name)
+      continue
+    }
+    const changes = {}
+    for (const field of SYNCABLE_FIELDS) {
+      if (row[field] !== existing[field]) changes[field] = row[field]
+    }
+    if (Object.keys(changes).length === 0) {
+      skippedNoChange.push(row.latin_name)
+      continue
+    }
+    toUpdate.push({ latin_name: row.latin_name, changes })
+  }
+
+  return { toUpdate, skippedUnapproved, skippedNotFound, skippedNotEtlOwned, skippedNoChange }
+}
+
 export function planCommit(rows, existingLatinNames) {
   const existing = new Set(existingLatinNames)
   const toUpsert = []

@@ -1,8 +1,8 @@
 # PROJ-11: Expand Plant Catalogue via FloraWeb/BfN ETL with AI-Assisted Trait Mapping
 
-## Status: In Review
+## Status: Deployed
 **Created:** 2026-07-06
-**Last Updated:** 2026-07-06 (QA complete — see QA Test Results)
+**Last Updated:** 2026-07-09 (live curator session — see "Live Curator Session" below)
 
 ## Summary
 A one-time (repeatable-by-hand) offline import pipeline that grows the plant catalogue
@@ -556,6 +556,56 @@ ready for the curated stage → review → commit cycle. BUG-3/BUG-4 are Low and
 - Live `import:plants → review → import:plants:commit` targeting ~50–80 approved rows (AC12–14).
 - Verify AC13 (PROJ-6 plan variety) after the catalogue grows.
 - Source images + attribution to exercise AC14's storage path (currently null).
+
+## Live Curator Session — naturadb.de cross-check + catalogue expansion (2026-07-09)
+
+Ran the full curator loop the QA notes flagged as the remaining gate — and then some.
+**Confirms the QA-predicted `native` risk was real**: the GBIF-derived `native` flag was
+wrong on a meaningful share of staged rows, always in the same direction (false when it
+should be true), across two separate generate runs. Not a one-off; treat `native` as
+needing a real review pass every time this pipeline runs, not just a spot-check.
+
+### What was done
+- Cross-checked all ~102 originally-staged species against naturadb.de (native status +
+  the four survival-critical fields) via parallel research agents; corrected `native`
+  (kept curator judgment on two ambiguous cases — Iris germanica, Malva moschata — at
+  `true` after review), `moisture`, `min_hardiness_zone`, `sun_tolerance`, and
+  `soil_compatibility` on ~20 rows, plus 7 `common_name` values that were Latin-name
+  copy-paste placeholders.
+- Expanded `CANDIDATE_ALLOWLIST` (`scripts/lib/selection.mjs`) by 39 species across
+  under-represented layers (groundcovers, perennials, shrubs, a few trees); regenerated
+  the staging file (142 candidates → 141 staged, 1 AI-inference failure: *Quercus robur*,
+  height out of the schema's 3000 cm cap).
+- Cross-checked all 141 `common_name` values against naturadb.de (90 corrected — mostly
+  the same Latin-name-placeholder pattern, at larger scale this time).
+- Full naturadb.de cross-check of the 20 newly-added species: **8 of 20 had the wrong
+  `native` flag** (all false→true), plus 8 hardiness-zone and several sun/moisture
+  corrections. Dropped **Erigeron karvinskianus** entirely (allowlist + staging file) —
+  naturadb.de flags it as an invasive Neophyt harmful to native biodiversity, which
+  doesn't fit the PRD's native-first positioning.
+- Discovered the standard `import:plants:commit` step (`ON CONFLICT DO NOTHING`) can
+  never push a correction into a row that already exists live — by design, so it never
+  clobbers an admin edit. That meant the `common_name` corrections for already-live rows
+  had no path to production. Added a third pipeline step:
+  **`npm run import:plants:sync`** (`scripts/import-plants-sync.mjs` + `planSync` /
+  `SYNCABLE_FIELDS` in `scripts/lib/catalogue.mjs`, tests in `catalogue.test.ts`) — updates
+  only approved, already-live rows whose live `source === 'open_data_etl'` (so a
+  hand-seeded or admin-authored row can never be touched), and only fields actually
+  listed in `SYNCABLE_FIELDS` (currently just `common_name`; trivially extendable).
+- Ran the real pipeline end-to-end against the live database: `import:plants:commit`
+  (+19 new species) then `import:plants:sync` (75 common_name corrections pushed into
+  existing rows). **Live catalogue: 141 → 160 plants.**
+- Verified in the actual running app (`/admin/plants`, full-page screenshot) — every
+  native flip, common_name fix, and sun/soil correction renders correctly; confirmed
+  Erigeron karvinskianus is absent from the live list.
+
+### Known residual (not a bug — the sync guard working as intended)
+Two already-corrected `common_name` values didn't make it live: **Achillea millefolium**
+("Gewöhnliche Schafgarbe", naturadb prefers "Gewöhnliche Wiesenschafgarbe") and
+**Betula pendula** ("Hänge-Birke", naturadb prefers "Gemeine Birke"). Both have
+`source: null` — they're original hand-seeded PROJ-5 rows the ETL never created, so
+`import:plants:sync`'s ownership guard correctly declined to touch them. Fix via a
+manual edit in `/admin/plants` if wanted; don't loosen the guard to "fix" this.
 
 ## Deployment
 _To be added by /deploy_

@@ -11,11 +11,13 @@ import {
   SIZE_MIN_CM,
   SIZE_MAX_CM,
   IMPORT_SOURCE,
+  SYNCABLE_FIELDS,
   importPlantSchema,
   buildStagedRow,
   needsMandatoryReview,
   orderNativesFirst,
   planCommit,
+  planSync,
   toPlantRow,
 } from './catalogue.mjs'
 import {
@@ -188,5 +190,52 @@ describe('planCommit', () => {
     const plan = planCommit(rows, ['Salvia nemorosa'])
     expect(plan.toUpsert).toEqual([])
     expect(plan.skippedExisting).toEqual(['Salvia nemorosa'])
+  })
+})
+
+describe('planSync', () => {
+  const staged = (overrides: Record<string, unknown>) => ({
+    ...buildStagedRow({ identity: IDENTITY, traits: VALID_TRAITS, status: 'existing' }),
+    approved: true,
+    ...overrides,
+  })
+
+  it('updates only syncable fields on an approved, ETL-owned, already-changed row', () => {
+    const rows = [staged({ latin_name: 'Corrected', common_name: 'Neuer Name' })]
+    const existing = [{ latin_name: 'Corrected', common_name: 'Alter Name', source: IMPORT_SOURCE }]
+    const plan = planSync(rows, existing)
+    expect(plan.toUpdate).toEqual([{ latin_name: 'Corrected', changes: { common_name: 'Neuer Name' } }])
+    expect(SYNCABLE_FIELDS).toContain('common_name')
+  })
+
+  it('skips unapproved rows', () => {
+    const rows = [staged({ latin_name: 'Not approved', approved: false, common_name: 'Neuer Name' })]
+    const existing = [{ latin_name: 'Not approved', common_name: 'Alter Name', source: IMPORT_SOURCE }]
+    const plan = planSync(rows, existing)
+    expect(plan.toUpdate).toEqual([])
+    expect(plan.skippedUnapproved).toEqual(['Not approved'])
+  })
+
+  it('skips rows not yet live', () => {
+    const rows = [staged({ latin_name: 'Brand new', common_name: 'Irgendwas' })]
+    const plan = planSync(rows, [])
+    expect(plan.toUpdate).toEqual([])
+    expect(plan.skippedNotFound).toEqual(['Brand new'])
+  })
+
+  it('never touches a row not created by this ETL — a hand-seeded or admin-authored row', () => {
+    const rows = [staged({ latin_name: 'Hand seeded', common_name: 'Neuer Name' })]
+    const existing = [{ latin_name: 'Hand seeded', common_name: 'Alter Name', source: null }]
+    const plan = planSync(rows, existing)
+    expect(plan.toUpdate).toEqual([])
+    expect(plan.skippedNotEtlOwned).toEqual(['Hand seeded'])
+  })
+
+  it('skips a row whose syncable fields already match (idempotency)', () => {
+    const rows = [staged({ latin_name: 'Already synced', common_name: 'Gleicher Name' })]
+    const existing = [{ latin_name: 'Already synced', common_name: 'Gleicher Name', source: IMPORT_SOURCE }]
+    const plan = planSync(rows, existing)
+    expect(plan.toUpdate).toEqual([])
+    expect(plan.skippedNoChange).toEqual(['Already synced'])
   })
 })
