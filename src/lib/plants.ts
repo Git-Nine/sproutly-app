@@ -80,12 +80,14 @@ export type Plant = {
   native: boolean
   image_url: string | null
   care_notes: string | null
-  // PROJ-11 additions — nullable/defaulted, backward-compatible with the pre-existing rows.
-  moisture: Moisture | null
-  image_attribution: string | null
-  image_license: string | null
-  source: string | null
-  ai_origin_fields: SurvivalCriticalField[] | null
+  // PROJ-11 additions — nullable/defaulted, backward-compatible with the pre-existing
+  // rows. Optional on the type too, so callers that predate these columns (and reads
+  // that don't select them) don't have to specify them.
+  moisture?: Moisture | null
+  image_attribution?: string | null
+  image_license?: string | null
+  source?: string | null
+  ai_origin_fields?: SurvivalCriticalField[] | null
   created_at: string
   updated_at: string | null
 }
@@ -136,6 +138,7 @@ export const plantSchema = z.object({
   image_url: z
     .string()
     .trim()
+    .nullable()
     .optional()
     // BUG-2 fix: http(s) only — `z.string().url()` also accepts javascript:/data:.
     .refine((v) => !v || isHttpUrl(v), 'Enter a valid http(s) URL (https://…)'),
@@ -144,26 +147,33 @@ export const plantSchema = z.object({
     .trim()
     .max(NOTES_MAX, `Keep notes under ${NOTES_MAX} characters`)
     .optional(),
-  // PROJ-11 additions. Optional so the pre-existing ~40 seed rows and the admin
-  // form (which doesn't yet edit these) keep validating. The import re-validates
-  // moisture as REQUIRED via importPlantSchema before staging/commit.
-  moisture: z.enum(optionValues(MOISTURE_OPTIONS), { message: 'Choose a moisture level' }).optional(),
+  // PROJ-11 additions. Nullable + optional so the pre-existing ~40 seed rows, the
+  // admin form (which doesn't yet edit these), and rows loaded from the nullable DB
+  // columns all keep validating. The import re-validates moisture as REQUIRED via
+  // importPlantSchema before staging/commit.
+  moisture: z
+    .enum(optionValues(MOISTURE_OPTIONS), { message: 'Choose a moisture level' })
+    .nullable()
+    .optional(),
   image_attribution: z
     .string()
     .trim()
     .max(ATTRIBUTION_MAX, `Keep attribution under ${ATTRIBUTION_MAX} characters`)
+    .nullable()
     .optional(),
   image_license: z
     .string()
     .trim()
     .max(LICENSE_MAX, `Keep the licence under ${LICENSE_MAX} characters`)
+    .nullable()
     .optional(),
   source: z
     .string()
     .trim()
     .max(SOURCE_MAX, `Keep the source under ${SOURCE_MAX} characters`)
+    .nullable()
     .optional(),
-  ai_origin_fields: z.array(z.enum(SURVIVAL_CRITICAL_FIELDS)).optional(),
+  ai_origin_fields: z.array(z.enum(SURVIVAL_CRITICAL_FIELDS)).nullable().optional(),
 })
 export type PlantValues = z.infer<typeof plantSchema>
 

@@ -122,6 +122,39 @@ export function orderNativesFirst(rows) {
   })
 }
 
+/**
+ * Assemble a staging entry from resolved identity + AI-inferred traits. Sets the
+ * review gate (review_required = any survival-critical field at low confidence),
+ * marks the row unapproved (the curator flips it), records provenance
+ * (source = open_data_etl, ai_origin_fields = all four survival-critical traits since
+ * they all start as AI guesses), and tags existing-in-catalogue rows as conflicts.
+ */
+export function buildStagedRow({ identity, traits, status }) {
+  return {
+    common_name: identity.common_name,
+    latin_name: identity.latin_name,
+    native: identity.native,
+    image_url: identity.image_url ?? null,
+    image_attribution: identity.image_attribution ?? null,
+    image_license: identity.image_license ?? null,
+    sun_tolerance: traits.sun_tolerance,
+    soil_compatibility: traits.soil_compatibility,
+    moisture: traits.moisture,
+    min_hardiness_zone: traits.min_hardiness_zone,
+    mature_height_cm: traits.mature_height_cm,
+    mature_spread_cm: traits.mature_spread_cm,
+    maintenance_level: traits.maintenance_level,
+    plant_type: traits.plant_type,
+    care_notes: traits.care_notes,
+    source: IMPORT_SOURCE,
+    ai_origin_fields: [...SURVIVAL_CRITICAL_FIELDS],
+    confidence: traits.confidence,
+    review_required: needsMandatoryReview(traits.confidence),
+    approved: false,
+    status,
+  }
+}
+
 /** Strip the staging-only metadata, leaving exactly the columns public.plants stores. */
 export function toPlantRow(staged) {
   const {
