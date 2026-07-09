@@ -1,0 +1,164 @@
+{
+  "name": "Sproutly — Plan Curation & Rationale",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "plan-curation",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "c2b2d0ef-0001-4000-a000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-220, 300],
+      "webhookId": "plan-curation",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_HEADER_AUTH_CRED_ID",
+          "name": "Sproutly webhook secret (x-sproutly-secret)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-haiku-4-5",
+          "cachedResultName": "claude-haiku-4-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are Sproutly's planting-plan curator for gardens in Germany. You receive a SITE (its real, measured conditions) and a MENU of plants that already passed hard survival filters (sun, winter hardiness, physical fit) for that site. Your job: choose the best-composed mix from the MENU ONLY, and explain it in warm, concrete, evidence-forward English.\n\nRules:\n- Pick between bounds.min_picks and bounds.max_picks plants. Use each plant at most once. Use ONLY ids from the menu — never invent an id.\n- Compose like a planting designer: favour layered structure (taller anchors + perennials + groundcover when available), native species, and plants matching the site's soil, moisture and the user's maintenance preference.\n- Write an intro of 2–3 sentences (max limits.intro_max_chars characters) explaining why this COMBINATION suits this specific site — reference its actual conditions (sun, surface, soil, size). Qualitative effort statements are welcome (e.g. 'every pick here is low-maintenance'); NEVER invent numbers (no 'X minutes per month'), never moralize about climate, guilt, or duty.\n- For EACH picked plant write one 'why' line (max limits.why_max_chars characters): concrete and specific to this site or this plant's role in the mix — maintenance effort, watering, structure, wildlife value. No fluff, no guilt.\n- Output ONLY one minified JSON object, no markdown, no prose: {\"intro\":\"...\",\"selection\":[{\"plant_id\":\"<id from the menu>\",\"why\":\"...\"}]}\n\nHere is the request JSON (site, bounds, limits, plants menu):\n{{ JSON.stringify($('Webhook').item.json.body) }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 2000
+        }
+      },
+      "id": "c2b2d0ef-0002-4000-a000-000000000002",
+      "name": "Curate (Claude)",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [20, 300],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_ANTHROPIC_CRED_ID",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude's JSON answer and re-validate it against the REQUEST the app sent.\n// The app re-validates again (route + client), but rejecting garbage here keeps\n// the failure visible in n8n executions. Contract: docs/n8n-plan-curation-workflow.md\nconst body = $('Webhook').item.json.body || {};\nconst menu = new Set((body.plants || []).map((p) => p.id));\nconst bounds = body.bounds || { min_picks: 1, max_picks: 12 };\nconst limits = body.limits || { intro_max_chars: 600, why_max_chars: 200 };\n\n// The Anthropic node exposes the reply text on different fields depending on\n// version — tolerate the common shapes.\nconst item = $input.first().json;\nlet text = item.text ?? item.content ?? item.message ?? '';\nif (Array.isArray(text)) text = text[0]?.text ?? '';\nif (typeof text === 'object' && text !== null) text = text.text ?? JSON.stringify(text);\n\nfunction fail(message) {\n  return [{ json: { branch: 'fallback', status: 'no_curation', message } }];\n}\n\nlet parsed;\ntry {\n  // Tolerate accidental markdown fences.\n  const raw = String(text).trim().replace(/^```(json)?/i, '').replace(/```$/, '').trim();\n  parsed = JSON.parse(raw);\n} catch (e) {\n  return fail('Claude answer was not valid JSON');\n}\n\nconst intro = typeof parsed.intro === 'string' ? parsed.intro.trim() : '';\nconst selection = Array.isArray(parsed.selection) ? parsed.selection : null;\nif (!intro || intro.length > limits.intro_max_chars) return fail('intro missing or too long');\nif (!selection || selection.length < bounds.min_picks || selection.length > bounds.max_picks) {\n  return fail('selection count outside bounds');\n}\nconst seen = new Set();\nconst shaped = [];\nfor (const pick of selection) {\n  const id = pick && typeof pick.plant_id === 'string' ? pick.plant_id : null;\n  const why = pick && typeof pick.why === 'string' ? pick.why.trim() : '';\n  if (!id || !menu.has(id) || seen.has(id)) return fail('selection contains an invalid or duplicate id');\n  if (!why || why.length > limits.why_max_chars) return fail('a why line is missing or too long');\n  seen.add(id);\n  shaped.push({ plant_id: id, why });\n}\n\nreturn [{ json: { branch: 'ok', status: 'ok', intro, selection: shaped } }];"
+      },
+      "id": "c2b2d0ef-0003-4000-a000-000000000003",
+      "name": "Parse & validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.branch }}",
+                    "rightValue": "ok",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.branch }}",
+                    "rightValue": "fallback",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c2b2d0ef-0004-4000-a000-000000000004",
+      "name": "Switch (curated?)",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"ok\", \"intro\": $json.intro, \"selection\": $json.selection } }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "c2b2d0ef-0005-4000-a000-000000000005",
+      "name": "Respond ✓ (ok)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [760, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"no_curation\", \"message\": $json.message } }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "c2b2d0ef-0006-4000-a000-000000000006",
+      "name": "Respond ⚠ (no curation)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [760, 400]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "Curate (Claude)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Curate (Claude)": {
+      "main": [
+        [{ "node": "Parse & validate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse & validate": {
+      "main": [
+        [{ "node": "Switch (curated?)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Switch (curated?)": {
+      "main": [
+        [{ "node": "Respond ✓ (ok)", "type": "main", "index": 0 }],
+        [{ "node": "Respond ⚠ (no curation)", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "templatecredsSetupCompleted": false,
+    "description": "Sproutly Plan stage (PROJ-12): Webhook -> Claude curates a composition from hard-filter survivors + writes rationale -> validate -> Respond. Any problem answers no_curation; the app then persists the pure rule-engine plan. No DB writes."
+  },
+  "tags": [{ "name": "sproutly" }, { "name": "plan" }, { "name": "ai-curation" }]
+}

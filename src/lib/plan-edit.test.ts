@@ -117,6 +117,7 @@ describe('mergeDuplicateLines', () => {
       sort_order: 0,
       soil_flag: false,
       pinned: false,
+      rationale: null,
       created_at: '2026-01-01',
       plants: plant({ id: plantId }),
       ...over,
@@ -157,6 +158,7 @@ describe('isPlanStale', () => {
     snapshot_maintenance: 'low',
     zone_unconfirmed: false,
     extra_match_count: 0,
+    rationale_intro: null,
     created_at: '2026-01-01',
     updated_at: null,
   }

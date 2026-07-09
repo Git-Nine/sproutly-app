@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { toast } from 'sonner'
-import { ChevronDown, Layers, Leaf, Minus, Plus, RotateCcw, Ruler, Shovel, Snowflake, Sprout, Sun, Trees, TriangleAlert, X } from 'lucide-react'
+import { ChevronDown, Layers, Leaf, Minus, Plus, RotateCcw, Ruler, Shovel, Snowflake, Sparkles, Sprout, Sun, Trees, TriangleAlert, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
   LAYER_DISPLAY_ORDER,
@@ -34,8 +34,15 @@ import {
 } from '@/components/ui/command'
 import { GeneratePlanButton } from './generate-plan-button'
 
-/** In-memory editor line. */
-type Line = { plant: Plant; quantity: number; soilFlag: boolean; pinned: boolean }
+/** In-memory editor line. `rationale` is the persisted AI "why this one" (PROJ-12) —
+ *  null for user-added plants and non-curated plans; carried through every save. */
+type Line = {
+  plant: Plant
+  quantity: number
+  soilFlag: boolean
+  pinned: boolean
+  rationale: string | null
+}
 
 /**
  * PROJ-7 — interactive plan review. Edit in place (add from matching survivors,
@@ -71,6 +78,7 @@ export function PlanEditor({
         quantity: l.quantity,
         soilFlag: l.soil_flag,
         pinned: Boolean(l.pinned),
+        rationale: l.rationale ?? null,
       })),
   )
   const [addOpen, setAddOpen] = useState(false)
@@ -107,6 +115,7 @@ export function PlanEditor({
           quantity: l.quantity,
           soilFlag: l.soilFlag,
           pinned: l.pinned,
+          rationale: l.rationale,
         })),
       )
     } catch (err) {
@@ -127,7 +136,8 @@ export function PlanEditor({
 
   function addPlant(plant: Plant) {
     const soilFlag = plan.snapshot_soil ? !plant.soil_compatibility.includes(plan.snapshot_soil) : false
-    const next = rebalance([...lines, { plant, quantity: 1, soilFlag, pinned: false }])
+    // User-added → rationale stays null: we didn't pick it, so no fabricated "why".
+    const next = rebalance([...lines, { plant, quantity: 1, soilFlag, pinned: false, rationale: null }])
     setLines(next)
     saveNow(next)
     setAddOpen(false)
@@ -215,6 +225,23 @@ export function PlanEditor({
         </p>
         <ConditionChips chips={conditionChips} className="mt-2" />
       </div>
+
+      {/* PROJ-12: plan-level rationale — only on AI-curated plans (presence of the
+          intro IS the curated signal). Plain text render; a snapshot of the plan
+          as generated, deliberately not rewritten by later edits. */}
+      {plan.rationale_intro && (
+        <Card>
+          <CardContent className="space-y-2 p-4">
+            <p className="flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-label">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden /> Why this plan
+            </p>
+            <p className="text-sm leading-relaxed text-foreground">{plan.rationale_intro}</p>
+            <p className="text-xs text-muted-foreground">
+              Plant picks are AI-assisted and survival-checked against your space&rsquo;s conditions.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Honest notes */}
       {plan.zone_unconfirmed && (
@@ -407,6 +434,12 @@ function EditablePlantCard({
               </Badge>
             )}
           </div>
+
+          {/* PROJ-12: the AI's one-line "why this one" — plain text, only on
+              AI-picked lines (user-added plants have rationale = null). */}
+          {line.rationale && (
+            <p className="text-xs leading-relaxed text-muted-foreground">{line.rationale}</p>
+          )}
 
           {plant.care_notes && (
             <Collapsible>

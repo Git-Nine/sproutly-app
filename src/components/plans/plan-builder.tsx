@@ -32,24 +32,25 @@ export function PlanBuilder({
   userId: string
 }) {
   const router = useRouter()
-  const startedRef = useRef(false)
+  // Guards the BUILD, not the effect setup: under React StrictMode (dev) the
+  // effect runs mount → cleanup → mount, and an effect-level "already started"
+  // guard leaves the second mount with no timer and no subscription — the
+  // builder then waits forever. The setup must re-register on every run (its
+  // cleanup makes that safe); only the build itself must happen once.
+  const builtRef = useRef(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (startedRef.current) return
-    startedRef.current = true
-
     const supabase = createClient()
-    let built = false
 
     async function build(enrichment: ScanEnrichment | null) {
-      if (built) return
-      built = true
+      if (builtRef.current) return
+      builtRef.current = true
       try {
         await persistGeneratedPlan(supabase, { scan, enrichment, userId })
         router.refresh() // server re-render now finds the plan → PlanEditor renders
       } catch (err) {
-        built = false
+        builtRef.current = false
         setError(err instanceof Error ? err.message : 'Could not build your plan. Please try again.')
       }
     }
@@ -60,7 +61,8 @@ export function PlanBuilder({
       return
     }
 
-    // Make sure enrichment is running (idempotent), then wait for it via realtime.
+    // Make sure enrichment is running (idempotent — a StrictMode double-fire
+    // just re-triggers the same dispatch), then wait for it via realtime.
     fetch('/api/enrich', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -103,7 +105,7 @@ export function PlanBuilder({
           type="button"
           onClick={() => {
             setError(null)
-            startedRef.current = false
+            builtRef.current = false
             router.refresh()
           }}
         >
@@ -113,10 +115,13 @@ export function PlanBuilder({
     )
   }
 
+  // "Crafting your plan…" — the PROJ-12 blocking interstitial. The same screen
+  // covers the AI curation wait and the plain rule-engine build (a fallback must
+  // look exactly like today's flow, so the copy never mentions AI).
   return (
     <div className="space-y-3 pt-8 text-center" role="status" aria-live="polite">
       <Leaf className="mx-auto h-8 w-8 animate-pulse text-primary" aria-hidden />
-      <h2 className="text-2xl">Building your plan…</h2>
+      <h2 className="text-2xl">Crafting your plan…</h2>
       <p className="inline-flex items-center gap-1.5 text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" />
         Matching plants to your space and conditions.
