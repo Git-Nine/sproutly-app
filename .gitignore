@@ -32,6 +32,10 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# PROJ-11 plant-catalogue import — curator's working staging file (regenerated,
+# holds not-yet-reviewed AI-inferred data; not shipped)
+plant-import.staging.yaml
+
 # mcp server config (contains access tokens)
 mcp.json
 

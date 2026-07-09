@@ -32,6 +32,9 @@ export type Plan = {
   // Plan-level flags / counts.
   zone_unconfirmed: boolean
   extra_match_count: number
+  /** PROJ-12: AI plan-level rationale (2–3 sentences). NULL = not AI-curated
+   *  (fallback or historical plan) — its presence is the "curated" signal. */
+  rationale_intro: string | null
   created_at: string
   updated_at: string | null
 }
@@ -47,6 +50,9 @@ export type PlanPlant = {
   soil_flag: boolean
   /** PROJ-7: the user hand-set this quantity → excluded from rebalancing. */
   pinned: boolean
+  /** PROJ-12: one-line AI "why this one". NULL for user-added plants and
+   *  fallback/historical lines — those never show a fabricated rationale. */
+  rationale: string | null
   created_at: string
 }
 

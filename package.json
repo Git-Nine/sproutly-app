@@ -13,7 +13,9 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:all": "vitest run && playwright test",
-    "seed:plants": "node --env-file=.env.local scripts/seed-plants.mjs"
+    "seed:plants": "node --env-file=.env.local scripts/seed-plants.mjs",
+    "import:plants": "node --env-file=.env.local scripts/import-plants.mjs",
+    "import:plants:commit": "node --env-file=.env.local scripts/import-plants-commit.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

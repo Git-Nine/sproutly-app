@@ -25,7 +25,8 @@
 | PROJ-8 | Shopping List & Deep Links | Deployed | P0 | PROJ-7 | [PROJ-8](PROJ-8-shopping-list-and-deep-links.md) | 2026-06-17 |
 | PROJ-9 | Progress Photo Log | Roadmap | P1 | PROJ-7 | — | 2026-06-17 |
 | PROJ-10 | In-App Notifications | Planned | P1 | PROJ-5, PROJ-6 | [PROJ-10](PROJ-10-in-app-notifications.md) | 2026-06-22 |
-| PROJ-11 | Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Architected | P1 | PROJ-1, PROJ-5 | [PROJ-11](PROJ-11-plant-catalogue-etl-floraweb.md) | 2026-07-06 |
+| PROJ-11 | Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | In Review | P1 | PROJ-1, PROJ-5 | [PROJ-11](PROJ-11-plant-catalogue-etl-floraweb.md) | 2026-07-06 |
+| PROJ-12 | AI Plan Curation & Rationale | In Progress | P1 | PROJ-6, PROJ-7 (soft: PROJ-11) | [PROJ-12](PROJ-12-ai-plan-curation-and-rationale.md) | 2026-07-07 |
 
 <!-- Add features above this line -->
 
@@ -35,6 +36,7 @@ PROJ-1 → PROJ-2 → PROJ-3 → PROJ-4 → PROJ-5 → PROJ-6 → PROJ-7 → PRO
 Note: the P0 journey (PROJ-1–8) is deployed and now iterates; P1 features (PROJ-9, PROJ-10, PROJ-11) build on top and are independent of each other. PROJ-11 (catalogue expansion) only needs PROJ-5's table + PROJ-1's seed pattern; it enlarges the palette PROJ-6 plans from, with two PROJ-6 engine changes (consume `moisture`, weight `native`) left as separate follow-ons.
 
 Notes:
+- **PROJ-12 backend built (2026-07-08, /backend):** the PRD **Plan** AI swap-in point implemented as augmentation — new `/api/curate-plan` (auth-guarded, re-derives survivors server-side, n8n "Plan Curation" workflow via `N8N_CURATE_WEBHOOK_URL`/`N8N_CURATE_SECRET`, 15s timeout, silent `{curated:false}` on any failure), pure validation core `src/lib/plan-curation.ts` (menu/bounds/length checks + `applyCuration` → engine-shaped plan, quantities via `computeQuantities`, re-checked by `findConstraintViolations`), curation wired inside `persistGeneratedPlan` (both PlanBuilder and Regenerate get it; fallback = exactly today's plan), rationale persisted as `plans.rationale_intro` + `plan_plants.rationale` (migration `20260708100000_proj12_plan_rationale.sql` — **apply via dashboard SQL Editor**), edits carry rationale through `replacePlanLines`, plan view shows the "Why this plan" intro card + per-plant why lines (plain text). Suite 337/337 green. **Deploy gates:** apply migration, set the two env vars (+ add to `.env.local.example` — blocked by local permissions this session), import/activate `docs/n8n/plan-curation.workflow.json`, live smoke-test. See PROJ-12 spec → Implementation Notes.
 - PROJ-4 (Environmental Enrichment) is split from PROJ-3 (Scan): separate concern, 3 external APIs, and a blocking open question on the BGR endpoint. The scan stores manual-form data on its own; enrichment augments it.
 - PROJ-5 (Plant DB & Admin) must precede PROJ-6 (Plan Generation) — the rule engine can't run without seeded, rule-tagged plants.
 - **Carried from PROJ-1 QA → PROJ-2:** runtime E2E verification of magic-link sign-in + auto-provisioned profile (AC-3), own-row RLS read/update + cross-user denial (AC-5/AC-6), and storage isolation upload/deny (AC-7/AC-8). PROJ-1 verified these structurally; PROJ-2's E2E suite must prove them against two real accounts.
@@ -62,4 +64,4 @@ Notes:
 
 - **PROJ-3 post-deploy enhancement (2026-07-06):** made the postcode **auto-fill in the common cases** (the recurring "postcode still not auto-filled" feedback — photo-GPS auto-fill only fires when the photo actually carries GPS EXIF, which most mobile uploads/screenshots/messenger-shared photos don't). Two additions, frontend-only, **no DB change / no migration**: (1) **Remember the last postcode** — `/scans/new` now reads the user's most recent scan's postcode (RLS-scoped) and passes it to `ScanForm` as `defaultPostcode`, pre-filling with a "From your last space — edit if needed" hint (kept "untouched" so a geotagged photo can still correct it). (2) **Auto-geolocate on the review step** — a new scan reaching review with no postcode yet quietly attempts `navigator.geolocation` once (no tap); added a `silent` option to `use-locate-postcode.ts` so this un-requested attempt degrades with no error toast on denial, while the explicit "Use my location" button still toasts. Precedence: remembered → photo GPS → auto-geolocate → button/manual. Co-located tests updated + new `use-locate-postcode.test.ts`; full suite 251/251 green. See PROJ-3 spec → "Post-Deploy Enhancement — Postcode auto-fill (remember last + auto-geolocate)".
 
-## Next Available ID: PROJ-12
+## Next Available ID: PROJ-13

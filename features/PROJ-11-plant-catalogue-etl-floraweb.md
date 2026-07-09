@@ -1,8 +1,8 @@
 # PROJ-11: Expand Plant Catalogue via FloraWeb/BfN ETL with AI-Assisted Trait Mapping
 
-## Status: Architected
+## Status: In Review
 **Created:** 2026-07-06
-**Last Updated:** 2026-07-06
+**Last Updated:** 2026-07-06 (QA complete — see QA Test Results)
 
 ## Summary
 A one-time (repeatable-by-hand) offline import pipeline that grows the plant catalogue
@@ -384,8 +384,178 @@ sources. What remains is a smaller, mechanical check rather than a legal negotia
 must verify each GBIF/CoL dataset's licence per pull** (they are set per dataset, not globally) and
 filter to CC0/CC-BY, recording each row's source and licence. See Open Questions.
 
+## Backend Implementation (2026-07-06)
+
+Built as two offline Node scripts extending the `seed:plants` pattern — no new UI, API
+routes, or RLS (as the Tech Design specifies). Server-side only (service-role +
+Anthropic key), never runs in the browser.
+
+### What was built
+- **Migration** `supabase/migrations/20260706120000_proj11_plants_catalogue_etl.sql` —
+  additive, backward-compatible columns on `public.plants`: `moisture`
+  (`dry`/`moist`/`wet` check), `image_attribution`, `image_license`, `source`, and
+  `ai_origin_fields text[]` (constrained to the four survival-critical field names).
+  All nullable/defaulted; the ~40 existing rows and every PROJ-5/PROJ-6 read are
+  untouched. **Apply via the Supabase dashboard SQL Editor** before running commit
+  (this project applies migrations by hand, not via the CLI history).
+- **Vocabulary** `src/lib/moisture.ts` — the `dry`/`moist`/`wet` bucket set
+  (dependency-free, mirrors `soil.ts`). `src/lib/plants.ts` gains `moisture` +
+  provenance fields on the `Plant` type (optional/nullable — additive) and on
+  `plantSchema` (nullable-optional, so the seed rows and admin form still validate),
+  plus `SURVIVAL_CRITICAL_FIELDS` and `moistureLabel`. `image_url` is now
+  `.nullable()` to match the nullable column.
+- **Pipeline library** (`scripts/lib/`):
+  - `catalogue.mjs` — the vocabulary + zod schemas (`importPlantSchema` requires
+    moisture; `stagedRowSchema`) + pure logic (`needsMandatoryReview`,
+    `orderNativesFirst`, `buildStagedRow`, `planCommit`). Locked to `@/lib/plants` by
+    `catalogue.test.ts` (a drift in either side fails the test).
+  - `sources.mjs` — live GBIF clients (`gbifMatchSpecies`, `gbifNativeStatus` with a
+    per-dataset CC0/CC-BY licence check, `gbifDatasetLicense`) + Wikidata German common
+    names. Fails loudly on an unreachable source; common-name lookup degrades to null.
+  - `selection.mjs` — curated `CANDIDATE_ALLOWLIST` (~100 German garden species across
+    all four layers) + rule-based `passesSelectionFilter` (EU Union list + BfN invasives,
+    protected species, aquatic/pasture/weed genera).
+  - `ai-traits.mjs` — one Claude call per species via `@anthropic-ai/sdk`
+    (`claude-opus-4-8`, adaptive thinking, structured output locked to the vocabulary),
+    returning traits + per-field confidence; re-validated with zod for the numeric
+    ranges json_schema can't express. `RefusalError` lets one species be skipped
+    without aborting the run.
+  - `staging.mjs` — human-readable YAML staging file (natives first, review header,
+    no anchors/aliases).
+- **Scripts** `scripts/import-plants.mjs` (`npm run import:plants` → stage) and
+  `scripts/import-plants-commit.mjs` (`npm run import:plants:commit` → commit only
+  `approved: true` rows, re-validate server-side, `ON CONFLICT DO NOTHING`, partial-
+  commit-safe report). New env var `ANTHROPIC_API_KEY` documented in
+  `.env.local.example`; the staging file is git-ignored.
+
+### Tests
+5 co-located suites in `scripts/lib/*.test.ts` (49 tests) covering vocabulary parity,
+schema validation, the review-gate + approved-only + idempotency commit logic, the
+selection filter + allowlist integrity, the GBIF/Wikidata clients (mocked fetch,
+including loud-fail and licence gating), AI inference (fake client — out-of-vocabulary
+and out-of-range rejection, refusal handling), and the YAML round-trip. Full suite
+251 → 300 green; lint + typecheck clean.
+
+### Notes / deviations
+- **Source strategy realized as designed:** GBIF (licence-filtered) + Wikidata for
+  identity/native/common-name; AI for the horticultural traits; FloraWeb/POWO left as
+  the curator's (unshipped) cross-reference. POWO/WCVP has no open API, so native
+  status leads on GBIF `establishmentMeans` + the per-dataset licence check — the spec's
+  own "native status needs curator attention" caveat applies and is surfaced in the
+  staging-file review header.
+- **Not yet run against live data / a real key** (needs the curator's `ANTHROPIC_API_KEY`
+  + network); the pure pipeline logic is fully test-covered offline. The first live
+  `import:plants` → review → `import:plants:commit` run (targeting ~50–80 approved rows)
+  is the QA/curator step.
+- **Model:** defaults to `claude-opus-4-8` per the Tech Decision; overridable via
+  `ANTHROPIC_MODEL`.
+
 ## QA Test Results
-_To be added by /qa_
+**Tested:** 2026-07-06 by /qa (QA Engineer + Red-Team)
+**Build under test:** working tree (migration + `scripts/lib/*`, `scripts/import-plants*.mjs`,
+`src/lib/plants.ts`, `src/lib/moisture.ts`) — not yet committed.
+
+### Nature of this QA
+PROJ-11 is an **offline, two-command curator pipeline** with no UI, API route, or RLS surface,
+and it has **never been run against a live Anthropic key or live GBIF/Wikidata** (spec §Backend
+Notes). So this QA is code-review + offline-logic verification + a security audit, plus a static
+check of the Anthropic API contract (the one part that can only be fully confirmed by a live run).
+The first live `import:plants → review → import:plants:commit` run remains a **carried-forward
+curator/QA step**, and one finding below (BUG-1) gates it.
+
+### Automated suites
+| Suite | Result |
+|-------|--------|
+| `npm test` (Vitest) | **300/300 pass** (incl. 49 new PROJ-11 tests across 5 co-located suites) |
+| `npm run lint` (ESLint) | **clean** |
+| `npx tsc --noEmit` (typecheck) | **clean** |
+| E2E (Playwright) | **N/A** — feature adds no routes/UI; existing specs unaffected (no source touched in `src/app`) |
+
+### Offline behavioral verification (exercised directly, not just via unit tests)
+- **Env guards / loud failure:** both scripts exit non-zero and list the exact missing env vars;
+  commit on a missing/corrupt staging file throws loudly and writes nothing (ACs: "fails loudly",
+  "no partial file"). ✅
+- **Review gate (survival-critical):** an `approved: true` row that is also `review_required: true`
+  (low AI confidence) is **blocked** from commit (lands in `skippedReview`). ✅
+- **Approved-only commit:** unapproved rows are skipped. ✅
+- **Idempotency / no-clobber:** existing `latin_name` rows are skipped (`skippedExisting`); the DB
+  column is `not null unique` (PROJ-5 migration) so `onConflict:'latin_name', ignoreDuplicates:true`
+  = `ON CONFLICT DO NOTHING` is well-founded. ✅
+- **Partial-commit safety:** a hand-edited out-of-vocabulary value (`moisture: soggy`) on an
+  otherwise valid-shaped row is rejected **per-row with a reported reason**, not the whole batch. ✅
+- **Natives-first ordering:** confirmed stable (natives, then alphabetical). ✅
+
+### Acceptance Criteria
+**Import (stage):** AC1 staging file w/ provenance+confidence ✅ · AC2 selection filter
+(allowlist + EU/BfN invasive + protected + habitat-genus exclusions; allowlist has no
+self-conflicts) ✅ · AC3 natives first ✅ · AC4 vocabulary-locked (json_schema enums + zod
+re-validation of ranges) ✅ · AC5 low-confidence → mandatory review, blocks commit ✅ ·
+AC6 existing marked conflict, not auto-overwritten ✅
+**Review + commit:** AC7 approved-only ✅ · AC8 server-side re-validation, partial-safe ✅ ·
+AC9 provenance (`source` + `ai_origin_fields`) recorded ✅ · AC10 counts report ✅ ·
+AC11 idempotent, no duplicates/clobber ✅
+**First batch + effect:** AC12 (~50–80 verified rows) / AC13 (plan variety) / AC14 (image
+attribution stored) — **cannot verify without the live run**; machinery is present and correct.
+Note: `buildStagedRow` currently always sets `image_url/attribution/license` to null (identity
+sources don't fetch images), so AC14's *storage path* exists but is unexercised until images are
+sourced. **Not a defect** — matches "images remain external URLs; this feature only stores
+attribution metadata."
+**Schema:** AC15 additive `moisture`/`image_attribution`/`image_license`/`source`/`ai_origin_fields`,
+all nullable/defaulted, CHECKed; existing ~40 rows and PROJ-5/6 reads untouched ✅
+
+### Anthropic API contract (static review vs. claude-api reference)
+The AI call in `ai-traits.mjs` is **correct** for `claude-opus-4-8`: `thinking:{type:'adaptive'}`
+(not the removed `budget_tokens`), `effort` nested inside `output_config`, structured output via
+`output_config.format:{type:'json_schema'}`, and the schema deliberately omits the numeric
+`minimum`/`maximum` constraints that structured outputs don't support (ranges are re-checked with
+zod afterward). Refusal is handled (`stop_reason==='refusal'` → `RefusalError` → skip one species).
+**One risk — see BUG-1.**
+
+### Bugs found
+| ID | Sev | Summary |
+|----|-----|---------|
+| BUG-1 | **Medium** — **FIXED 2026-07-06** | `inferTraits` set `max_tokens: 2048` while running **adaptive thinking at `effort:'high'`**. On Opus 4.8 thinking tokens count against `max_tokens`, so careful per-species reasoning could exhaust the budget before the JSON was emitted → `stop_reason:'max_tokens'` → truncated/empty output → parse/extract failure → species silently skipped as "AI inference failed", risking a high skip rate on the first run. **Fix applied:** default `maxTokens` raised `2048 → 8192`, plus an explicit `stop_reason==='max_tokens'` guard that throws a clear "response truncated — raise maxTokens or lower effort" error instead of a confusing parse failure. Co-located test added (`ai-traits.test.ts`); suite 300 → 301 green, lint clean. Still confirm on a live smoke-test of ~3–5 species before the full run. |
+| BUG-2 | Low | `output_config` carries `effort` **and** `format` together. This is a valid combination per the API reference, but the pipeline has never executed it live — **verify on the first real call** that the request isn't rejected; if it is, split the concern or drop `effort`. |
+| BUG-3 | Low | `image_url` validation differs between layers: `importPlantSchema` uses a `^https?://` **regex**, while the app's `plantSchema`/`safeImageUrl` use a real `URL()` parser (the PROJ-5 BUG-2 hardening). The regex is looser (accepts malformed authorities) though it still blocks `javascript:`/`data:`. Harmless today (`image_url` is always null from the import), but the two should share `isHttpUrl` so a future image-sourcing step can't stage a URL the app would later reject. |
+| BUG-4 | Low | `care_notes` is **AI free-text** (≤2000 chars) committed to `public.plants` and rendered later (PROJ-7 per-plant blurb). Only length is validated. If any downstream view renders it as HTML rather than text it becomes a stored-content vector. Confirm the plan/plant views render `care_notes` as text (they appear to). Display-side, out of this feature's scope — flagged for the consuming view. |
+
+### Security audit (red-team) — no Critical/High findings
+- **Secrets:** `ANTHROPIC_API_KEY` + `SUPABASE_SERVICE_ROLE_KEY` read only from env via `--env-file`,
+  documented in `.env.local.example` with dummy values; `.env*.local` and the staging file are
+  git-ignored. No secrets in source. ✅
+- **Trust boundary:** service-role client is server-side-only (`.mjs` curator scripts, never bundled
+  to the browser); no RLS change; the table's PROJ-5 admin-write policy is unaffected for the app. ✅
+- **Prompt-injection surface:** external data reaching the model is the Wikidata German common name
+  + the fixed allowlist Latin name. Output is constrained to the vocabulary by `json_schema`, so an
+  injected instruction can't produce an out-of-vocabulary trait; only `care_notes` is free-text →
+  see BUG-4. Wikidata SPARQL value is quote/backslash-stripped before embedding (allowlist is
+  trusted anyway). ✅
+- **Licence gating:** per-dataset CC0/CC-BY(-SA) filter drops the native claim when a distribution's
+  dataset isn't redistributable (safe, honest fallback) — matches the spec's mandatory per-dataset
+  licence check. ✅
+- **DoS/rate:** N/A (offline, curator-run, one Claude call per allowlist species).
+
+### Data-quality note (not a bug — carried from the Tech Design)
+Native status leans on GBIF `establishmentMeans` + the per-dataset licence check; the
+`sourceTaxonKey ? null : datasetKey` guard conservatively drops the licence (→ `native:false`)
+whenever a German distribution carries a `sourceTaxonKey`. This may mark many candidates non-native
+until a curator confirms. The spec already calls native status a "needs curator attention" field and
+surfaces it in the staging review header — **budget the first review session for verifying `native`,
+not just the AI traits.**
+
+### Production-ready recommendation: **Ready pending a live smoke-test** (BUG-1 fixed)
+No Critical/High defects; all offline logic, ACs, and the security posture pass. **BUG-1 (the
+truncation risk that gated the stage step) is now fixed** — `max_tokens` raised to 8192 with an
+explicit `max_tokens` stop-reason guard (301/301 tests green, lint clean). The feature's core value
+(AI trait inference) still has never executed live, so the remaining gate is operational, not code:
+do a **live smoke-test of ~3–5 species** to confirm inference completes end-to-end and that
+`output_config` carrying `effort`+`format` is accepted (BUG-2). Once that passes, the pipeline is
+ready for the curated stage → review → commit cycle. BUG-3/BUG-4 are Low and can follow.
+
+### Carried forward to the curator/first-run
+- Live `import:plants → review → import:plants:commit` targeting ~50–80 approved rows (AC12–14).
+- Verify AC13 (PROJ-6 plan variety) after the catalogue grows.
+- Source images + attribution to exercise AC14's storage path (currently null).
 
 ## Deployment
 _To be added by /deploy_

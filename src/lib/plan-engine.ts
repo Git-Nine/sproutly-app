@@ -44,6 +44,8 @@ export type GeneratedLine = {
   soilFlag: boolean
   reasons: PlanReasons
   sortOrder: number
+  /** PROJ-12: one-line AI "why this one". Absent on pure rule-engine lines. */
+  rationale?: string
 }
 
 export type PlanSnapshot = {
@@ -63,6 +65,8 @@ export type GeneratedPlan = {
   prepNote: boolean
   isEmpty: boolean
   snapshot: PlanSnapshot
+  /** PROJ-12: AI plan-level rationale (2–3 sentences). Absent on pure rule-engine plans. */
+  rationaleIntro?: string
 }
 
 export type GeneratePlanInput = {
@@ -278,7 +282,8 @@ export function computeQuantities(input: {
   return result
 }
 
-function layerEligible(layer: PlantType, areaSqm: number): boolean {
+/** Whether a layer is offered at all for a site of this size (no trees on a balcony). */
+export function layerEligible(layer: PlantType, areaSqm: number): boolean {
   if (layer === 'groundcover' || layer === 'perennial') return true
   if (layer === 'shrub') return areaSqm >= SHRUB_MIN_AREA_SQM
   return areaSqm >= TREE_MIN_AREA_SQM // tree
