@@ -1,8 +1,8 @@
 # PROJ-13: Survival Confidence Band
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-07-10
-**Last Updated:** 2026-07-10
+**Last Updated:** 2026-07-10 (frontend built — feature code-complete, ready for /qa)
 
 ## Dependencies
 - Requires: PROJ-6 (Rule-Based Plan Generation) — the hard filters, ranking, and plan snapshot the band is derived from
@@ -116,10 +116,10 @@ It serves the PRD's core personas directly: Maya needs one glanceable reassuranc
 
 ## Open Questions
 - [ ] Should the PROJ-12 curator prompt receive per-plant bands (and be instructed not to contradict them in rationale prose)? Follow-on candidate; v1 keeps curation unchanged.
-- [ ] Should "Worth checking" reasons link to the plant's `care_notes` (e.g. soil-preparation guidance) or stay self-contained text? Leaning link-if-notes-exist; decide at /frontend.
-- [ ] Exact visual treatment (chip vs. inline text, iconography, colour semantics within the design system) — design decision at /frontend; colour must not be the only carrier (a11y).
+- [x] Should "Worth checking" reasons link to the plant's `care_notes`? — **resolved at /frontend (2026-07-10): link-if-notes-exist.** The soil-mismatch reason appends "see the care tips below" only when the plant has care notes (the existing "Care tips" collapsible sits on the same card); reasons stay self-contained text otherwise. No navigation — the guidance is already on the card.
+- [x] Exact visual treatment — **resolved at /frontend (2026-07-10):** tinted pill chips with a per-band icon + text label (colour never the only carrier): High confidence = forest green + ShieldCheck, Good match = sage + CircleCheck, Worth checking = terracotta + Eye (the design system's "needs attention" hue — deliberately not red). Per-plant chip expands (Collapsible, same affordance as Care tips) into plain-language reasons; the headline is a card with the eyebrow label "Survival confidence".
 - [ ] When PROJ-9 ships and outcome data accumulates: what volume/duration is needed before a calibrated numeric score becomes defensible? Research question, out of v1.
-- [ ] Exact rainfall bucket thresholds (mm/year for low / medium / high) — set at /backend against real DWD value ranges for Germany (~450–2000mm); must be named constants with a comment citing the source.
+- [x] Exact rainfall bucket thresholds (mm/year for low / medium / high) — **resolved at /backend (2026-07-10):** `RAINFALL_LOW_MAX_MM = 600` (≤ 600 = low), `RAINFALL_HIGH_MIN_MM = 1000` (≥ 1000 = high), between = medium. Named constants in `src/lib/plan-confidence.ts` with a source comment: DWD multi-annual precipitation grids (1991–2020) — Germany's area mean ~800 mm/yr, driest lowlands ~450–550 mm, upland/pre-alpine > 1000 mm. Deliberately wide so only genuinely dry/wet sites leave "medium"; only opposite extremes conflict.
 
 ## Decision Log
 
@@ -213,6 +213,65 @@ None — everything is built with what's already installed.
 ### Build order
 1. **/backend first** (unusual but right here): migration + confidence module + engine ranking change + snapshot persistence — all testable without UI.
 2. **/frontend second**: headline + badge + picker wiring, copy for reason codes.
+
+## Implementation Notes — Backend
+_Added 2026-07-10 by /backend. Everything below is headless (module + engine + migration + persistence); the UI (headline, badges, picker wiring, reason-code copy) is the /frontend step._
+
+### What was built
+
+**1. Migration `20260710100000_proj13_plan_confidence_snapshot.sql` — ✅ applied to production via dashboard SQL Editor (2026-07-10).**
+Two nullable columns on `plans`, nothing else: `snapshot_rainfall_mm` (integer, raw mm, check 0–10000) and `snapshot_location_basis` (text, check `gps`/`postcode_centroid`). No RLS change (rides the existing owner-only policies), no backfill — pre-PROJ-13 plans keep NULLs and the module skips those factors, so "never guess" falls out of the schema exactly as the tech design intended.
+
+**2. `src/lib/plan-confidence.ts` — the pure confidence module (single source of truth for every band).**
+- `plantConfidence(plant, site)` → `{ band, mismatches, gaps, offsets, matches }`. Bands: `high` / `good` / `worth_checking`. All reasons are machine-readable codes (`soil-mismatch`, `zone-unconfirmed`, `native-offset`, `moisture-match`, …); ALL copy lives in the display layer, where the no-percentages/no-guarantee rule is enforced.
+- Band rules exactly per spec: mismatches (soil conflict, moisture conflict) force `worth_checking` and are un-offsettable (offsets are not even computed then); gaps (soil unknown, zone unconfirmed, non-empty `ai_origin_fields`, postcode-centroid location) are mild — one un-offset gap = `good`, two+ = `worth_checking`; boosts (native, maintenance match) each offset ONE gap, never a mismatch, and never penalize by absence. Offset gaps stay visible in `gaps` (honesty) with the consumed boost in `offsets`.
+- Missing data is skipped, never guessed: `moisture: null` plant → factor skipped; `rainfallMm: null` site → moisture skipped for all plants (site-level, per spec edge case); `locationBasis: null` (old plans) → skipped; empty `ai_origin_fields` = verified.
+- Rainfall bucketed at READ time behind `RAINFALL_LOW_MAX_MM = 600` / `RAINFALL_HIGH_MIN_MM = 1000` (DWD-cited, see Open Questions); only opposite extremes conflict (`moistureConflicts`) — `moist` plants and `medium` sites never conflict.
+- `summarizePlanConfidence(bands)` → headline: majority band + explicit exception counts, `null` for an empty plan (a band on nothing is noise). **Ties go to the LOWER-confidence band** — a deterministic rule the spec didn't fix; chosen to never oversell.
+- `siteGaps(site)` → the site-level gaps for headline attribution ("we couldn't confirm your soil type" instead of 11 mediocre-looking plants).
+
+**3. Engine (`src/lib/plan-engine.ts`) — ranking-only change.**
+`rankLayer` now sorts by confidence band FIRST (via `BAND_RANK`), with the entire previous order (native → soil → maintenance → compact → name) as the tiebreak within a band. Hard filters untouched — no plant is excluded or admitted by this feature; the 252-site guardrail matrix passes unchanged. `PlanSnapshot` gains `rainfall_mm` + `location_basis`; new narrow-Pick helpers `siteRainfall` (null unless `climate_status = 'success'`) and `siteLocationBasis`; `confidenceSiteFromSnapshot` keeps snapshot → module input in one place. All four site-fact helpers (`siteSoil`/`siteZone`/`siteRainfall`/`siteLocationBasis`) now declare minimal per-helper Picks so narrow callers (e.g. `isPlanStale`) keep compiling.
+
+**4. Snapshot persistence + Plan type.**
+`persistGeneratedPlan` (plans-client.ts) writes the two new columns; `applyCuration` (plan-curation.ts) builds the same enlarged snapshot, so curated and rule-engine plans snapshot identically (AC: band never depends on the AI path). `Plan` type + `confidenceSiteFromPlan(plan)` (plans.ts) give the UI the exact module input from a persisted row — bands are COMPUTED, never persisted.
+**Deliberate decision:** `isPlanStale` does NOT consider the new snapshot fields — they feed banding/ranking only, and including them would flag every pre-PROJ-13 plan stale the moment this ships. Documented in code.
+
+### Tests (337 → 383, all green; lint + production build clean)
+- `plan-confidence.test.ts` (28): every band AC — mismatch un-offsettability, gap/offset arithmetic (incl. never consuming more boosts than gaps), skip-not-punish for every nullable input, bucket boundaries (600/601/999/1000), headline majority/exceptions/tie-to-lower/empty-null, determinism, codes-are-wording-free.
+- `plan-engine.test.ts` (+4): higher band outranks lower in the same layer even against a native (band beats the old first key); unverified-AI-traits plants rank behind clean ones; original native-first order intact as tiebreak within a band; snapshot captures rainfall/location basis (and nulls them when climate failed).
+- `plan-edit.test.ts` (+3): `confidenceSiteFromPlan` mapping + null pass-through; PROJ-13 enrichment changes do NOT mark a plan stale.
+- `plans-client.test.ts` (+2): persisted plan rows carry the two new snapshot columns; NULLs when enrichment is missing.
+- Guardrail (252-site matrix, zero violations) and catalogue suites pass unchanged.
+
+### Deploy gate
+~~Apply `20260710100000_proj13_plan_confidence_snapshot.sql` via the dashboard SQL Editor.~~ **Done — applied 2026-07-10, same day as the backend build.** No other gates: no env vars, no n8n, no new routes. The code can now reach production in any order.
+
+## Implementation Notes — Frontend
+_Added 2026-07-10 by /frontend. The feature is now code-complete: pure module + engine ranking (backend step) and the display layer (this step). Next: /qa._
+
+### What was built
+
+**1. `src/components/plans/plan-confidence-view.tsx` — the display layer (new, +co-located test).**
+Three thin renderers, all fed by the pure module's output so surfaces can never disagree, and the ONLY place any band/reason wording exists (which is where the no-percentages / no-score / no-"guarantee" rule is enforced — the co-located test renders every code and asserts it):
+- **`PlanConfidenceHeadline`** — card near the plan intro: eyebrow "Survival confidence", serif band label with icon, count line ("9 of 11 plants · 2 worth checking — the band on each plant below says why", or "All N plants" when uniform). Below it, either the site-level gap attribution from `siteGaps()` ("We couldn't confirm your soil type — that's a gap in our site data, not in the plants", per the spec's site-wide-gap edge case) or, with complete site data, the checked-evidence line for Thomas ("Checked against your sunlight, loam soil, winter zone 8 and local rainfall"). Footer reassurance: every plant already passed the survival checks; bands show how much we could confirm on top.
+- **`ConfidenceBadge`** — per-plant chip that expands (Collapsible, the same affordance as the existing Care tips) into plain-language reasons: a band tagline ("Passed our core survival checks — worth a quick look before planting" — the lowest band never reads as "likely to die"), mismatches in terracotta naming the conflict AND the fix (soil: "some soil preparation at planting helps it settle in", moisture: direction-specific — dry plant/wet site → drainage, wet plant/dry site → watering), gaps and consumed offsets in muted text (offset gaps stay visible — honesty), plus a "Checks out: sunlight, your soil, your winter zone" positive line from the match codes.
+- **`ConfidenceChip`** — the compact band pill (icon + label), used on every add-picker candidate row.
+
+Bands are never colour-only: each has its own icon (ShieldCheck / CircleCheck / Eye) and text label. Colours follow the design system: forest green, sage, and terracotta (the established "needs attention" hue) with darkened text shades for small-size contrast.
+
+**2. PlanEditor wiring (`plan-editor.tsx`).**
+`confidenceSite = confidenceSiteFromPlan(plan)` (snapshot-sourced — honest for stale plans), then per-line `plantConfidence` and `summarizePlanConfidence` are derived AT RENDER, so the headline, line badges, and picker chips all recompute together on every add/remove with no extra state to drift. The headline renders only when the plan has lines (`summarizePlanConfidence` returns null on empty — "a band on nothing is noise"). Every add-picker `CommandItem` carries its candidate's `ConfidenceChip` (site = same plan snapshot).
+
+**3. Two deliberate consolidations (both documented in code):**
+- The old per-line **"May not suit your soil" badge is retired** — a soil conflict now surfaces as the band's soil-mismatch reason. The spec makes the deterministic band the authoritative display, and the module re-derives soil match from the snapshot (the persisted `soil_flag` stays untouched for persistence/compat; only the duplicate visual went).
+- The **zone-unconfirmed banner** now renders only when the plan is empty (no headline): with plants present, the headline's site-gap attribution already says the zone couldn't be confirmed, and two banners would say it twice. (That legacy banner's "isn't guaranteed" wording predates PROJ-13 and is now effectively retired from plans with lines.)
+
+### What was NOT changed
+No new routes, no new packages, no shadcn additions (Card/Badge/Collapsible/Popover/Command already installed), no DB access from the new component — it's fully presentational. PROJ-12's rationale card and per-plant "why" lines are untouched and coexist with the badge exactly as the spec's conflict edge case prescribes.
+
+### Tests (383 → 395, all green; lint + production build clean)
+`plan-confidence-view.test.tsx` (12): chip carries the band as text (a11y); high-confidence badge lists matched factors; soil mismatch = Worth checking even for a native plant, names conflict + fix, links care tips only when notes exist; direction-specific moisture advice both ways; native offset shows band High with gap AND "locally adapted" both visible; unverified-traits + postcode gaps explained plainly; headline majority + exception counts ("9 of 11 plants · 2 worth checking"); checked-evidence line with full site data; site-gap attribution ("not in the plants"); and the copy-rule sweep — every reason code + band rendered at once, asserting no `%`, no "guarantee", no "score", no `8/10`-style numerics anywhere.
 
 ## QA Test Results
 _To be added by /qa_

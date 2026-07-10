@@ -15,9 +15,15 @@ import {
 } from '@/lib/plants'
 import { sunLabel, surfaceLabel, spaceTypeLabel, type Scan, type ScanEnrichment } from '@/lib/scans'
 import { ConditionChips, type ConditionChip } from '@/components/plans/plan-conditions'
-import { needsPrep, type Plan, type PlanPlantWithPlant } from '@/lib/plans'
+import {
+  ConfidenceBadge,
+  ConfidenceChip,
+  PlanConfidenceHeadline,
+} from '@/components/plans/plan-confidence-view'
+import { confidenceSiteFromPlan, needsPrep, type Plan, type PlanPlantWithPlant } from '@/lib/plans'
 import { replacePlanLines } from '@/lib/plans-client'
 import { computeQuantities } from '@/lib/plan-engine'
+import { plantConfidence, summarizePlanConfidence, type PlantConfidence } from '@/lib/plan-confidence'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -180,6 +186,18 @@ export function PlanEditor({
     saveNow(next)
   }
 
+  // PROJ-13: confidence bands — all derived at render from the pure module, so
+  // the headline, the line badges, and the picker chips recompute together on
+  // every add/remove and can never disagree. Site facts come from the plan
+  // SNAPSHOT (honest for stale plans); plant traits live from the catalogue.
+  const confidenceSite = useMemo(() => confidenceSiteFromPlan(plan), [plan])
+  const lineConfidence = new Map<string, PlantConfidence>(
+    lines.map((l) => [l.plant.id, plantConfidence(l.plant, confidenceSite)]),
+  )
+  const confidenceSummary = summarizePlanConfidence(
+    lines.map((l) => lineConfidence.get(l.plant.id)!.band),
+  )
+
   // Chips describe the conditions the plan was *based on* (its snapshot), which
   // may differ from the current scan when the plan is stale — hence sourced from
   // the snapshot, not the live scan. Nullable env chips appear only when known.
@@ -226,6 +244,13 @@ export function PlanEditor({
         <ConditionChips chips={conditionChips} className="mt-2" />
       </div>
 
+      {/* PROJ-13: plan-level survival confidence — majority band + exception
+          counts + site-level gap attribution. Only when the plan has plants
+          (a band on nothing is noise). */}
+      {confidenceSummary && (
+        <PlanConfidenceHeadline summary={confidenceSummary} site={confidenceSite} />
+      )}
+
       {/* PROJ-12: plan-level rationale — only on AI-curated plans (presence of the
           intro IS the curated signal). Plain text render; a snapshot of the plan
           as generated, deliberately not rewritten by later edits. */}
@@ -243,8 +268,10 @@ export function PlanEditor({
         </Card>
       )}
 
-      {/* Honest notes */}
-      {plan.zone_unconfirmed && (
+      {/* Honest notes. The zone banner only appears when no confidence headline
+          renders (empty plan) — with plants present, PROJ-13's headline carries
+          the zone-unconfirmed gap and a second banner would say it twice. */}
+      {plan.zone_unconfirmed && !confidenceSummary && (
         <div className="flex gap-3 rounded-xl border border-border bg-secondary px-4 py-3">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
@@ -289,6 +316,8 @@ export function PlanEditor({
                     <EditablePlantCard
                       key={line.plant.id}
                       line={line}
+                      confidence={lineConfidence.get(line.plant.id)!}
+                      confidenceSite={confidenceSite}
                       maintenancePref={plan.snapshot_maintenance}
                       onStep={(delta) => stepQty(line.plant.id, delta)}
                       onSet={(qty) => setQty(line.plant.id, qty)}
@@ -324,10 +353,15 @@ export function PlanEditor({
                       onSelect={() => addPlant(p)}
                     >
                       <Plus className="h-4 w-4 opacity-60" />
-                      <span className="flex flex-col">
-                        <span>{p.common_name}</span>
-                        <span className="text-xs italic text-muted-foreground">{p.latin_name}</span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate">{p.common_name}</span>
+                        <span className="truncate text-xs italic text-muted-foreground">{p.latin_name}</span>
                       </span>
+                      {/* PROJ-13: candidates carry their band so swaps are informed. */}
+                      <ConfidenceChip
+                        band={plantConfidence(p, confidenceSite).band}
+                        className="ml-auto"
+                      />
                     </CommandItem>
                   ))}
                 </CommandGroup>
@@ -364,6 +398,8 @@ export function PlanEditor({
 
 function EditablePlantCard({
   line,
+  confidence,
+  confidenceSite,
   maintenancePref,
   onStep,
   onSet,
@@ -371,6 +407,8 @@ function EditablePlantCard({
   onRemove,
 }: {
   line: Line
+  confidence: PlantConfidence
+  confidenceSite: ReturnType<typeof confidenceSiteFromPlan>
   maintenancePref: Plan['snapshot_maintenance']
   onStep: (delta: number) => void
   onSet: (qty: number) => void
@@ -423,17 +461,20 @@ function EditablePlantCard({
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
-            {plant.native && <Badge>Native</Badge>}
-            {maintenanceMatch && (
-              <Badge variant="secondary">{maintenanceLabel(plant.maintenance_level)}-maintenance match</Badge>
-            )}
-            {line.soilFlag && (
-              <Badge variant="outline" className="border-[#C2683F] text-[#C2683F]">
-                May not suit your soil
-              </Badge>
-            )}
-          </div>
+          {/* PROJ-13: the band + its tap-to-expand reasons. The old standalone
+              "May not suit your soil" badge is retired — a soil conflict now
+              surfaces as this band's "worth checking" reason (the authoritative
+              display per the PROJ-13 spec), so it isn't said twice. */}
+          <ConfidenceBadge confidence={confidence} plant={plant} site={confidenceSite} />
+
+          {(plant.native || maintenanceMatch) && (
+            <div className="flex flex-wrap gap-1.5">
+              {plant.native && <Badge>Native</Badge>}
+              {maintenanceMatch && (
+                <Badge variant="secondary">{maintenanceLabel(plant.maintenance_level)}-maintenance match</Badge>
+              )}
+            </div>
+          )}
 
           {/* PROJ-12: the AI's one-line "why this one" — plain text, only on
               AI-picked lines (user-added plants have rationale = null). */}
