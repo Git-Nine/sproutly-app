@@ -1,6 +1,6 @@
 # PROJ-13: Survival Confidence Band
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-07-10
 **Last Updated:** 2026-07-10
 
@@ -119,6 +119,7 @@ It serves the PRD's core personas directly: Maya needs one glanceable reassuranc
 - [ ] Should "Worth checking" reasons link to the plant's `care_notes` (e.g. soil-preparation guidance) or stay self-contained text? Leaning link-if-notes-exist; decide at /frontend.
 - [ ] Exact visual treatment (chip vs. inline text, iconography, colour semantics within the design system) — design decision at /frontend; colour must not be the only carrier (a11y).
 - [ ] When PROJ-9 ships and outcome data accumulates: what volume/duration is needed before a calibrated numeric score becomes defensible? Research question, out of v1.
+- [ ] Exact rainfall bucket thresholds (mm/year for low / medium / high) — set at /backend against real DWD value ranges for Germany (~450–2000mm); must be named constants with a comment citing the source.
 
 ## Decision Log
 
@@ -139,13 +140,79 @@ It serves the PRD's core personas directly: Maya needs one glanceable reassuranc
 | Existing plans get bands computed from whatever their snapshot holds; missing factors skipped | Honest for old data without migration/backfill; "never guess" is the feature's core principle. | 2026-07-10 |
 
 ### Technical Decisions
-_To be added by /architecture_
+| Decision | Rationale | Date |
+|----------|-----------|------|
+| One new pure module owns all band logic; engine imports it, UI renders its output | The spec's "surfaces can never disagree" requirement enforced by construction; mirrors the plan engine's proven pure-module pattern; testable without UI or DB. | 2026-07-10 |
+| Bands are computed, never persisted | Recomputing from snapshot + current catalogue means curator corrections improve existing plans' bands automatically; no stale stored band, no backfill, no extra writes on every edit. | 2026-07-10 |
+| Two new nullable snapshot columns on `plans` (rainfall, location basis) — not a JSON blob, not a new table | Matches the existing typed `snapshot_*` column pattern; nullable = old plans skip those factors, so "never guess" falls out of the schema. Additive, no RLS change. | 2026-07-10 |
+| Store raw rainfall mm in the snapshot; bucket into low/medium/high at read time behind named constants | Thresholds are interpretation, not data — tuning them later must not require touching stored plans. Only opposite extremes (dry↔high, wet↔low) count as a conflict: conservative, avoids false alarms from mid-range values. | 2026-07-10 |
+| Reasons returned as machine-readable codes; UI owns the copy | Wording iterations (and the no-%/no-"guarantee" rule) live in one display layer; the calculation stays wording-free and the codes are directly assertable in tests. | 2026-07-10 |
+| Band as first sort key in the existing per-layer ranking; previous order becomes the tiebreak | Smallest possible engine change that satisfies "the plan practices what the band preaches"; hard filters untouched so the guardrail suite's semantics stay valid. | 2026-07-10 |
+| Per-plant traits read live from the catalogue, not snapshotted | The plan view already loads plant rows; snapshotting traits would freeze errors a curator later fixes. Site facts snapshot (honest history), plant facts live (honest present). | 2026-07-10 |
+| Module reused isomorphically server-side (generation ranking) and client-side (live recompute on edit) | Pure + dependency-free makes this free; avoids an API round-trip per edit and keeps the picker instant. | 2026-07-10 |
+| Backend built before frontend for this feature | The migration, module, and ranking change are fully testable headless; the UI is a thin renderer of module output. | 2026-07-10 |
 
 ---
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+_Added 2026-07-10 by /architecture._
+
+### The one-sentence design
+One new, pure "confidence" calculation module is the single source of truth for every band anywhere in the app; the engine consults it for ranking, the plan view and picker consult it for display, and two small nullable additions to the plan snapshot give it the site facts it doesn't have yet — no new APIs, no new packages, no AI.
+
+### Component Structure
+
+```
+Plan view (existing PlanEditor / PlanBuilder screens)
++-- "Why this plan" intro area (existing, PROJ-12)
+|   +-- NEW: Plan Confidence Headline
+|       +-- majority band + exception count ("High confidence — 9 of 11 plants; 2 worth checking")
+|       +-- headline reasons (site-level: soil confirmed? zone confirmed? GPS or postcode?)
++-- Plant line (existing, one per recommended plant)
+|   +-- NEW: Per-plant Confidence Badge
+|       +-- band chip + tap/expand for plain-language reasons
+|       +-- (sits alongside the existing PROJ-12 "why this one" rationale text)
++-- "More plants that suit your space" picker (existing)
+    +-- NEW: same Confidence Badge on every candidate row
+```
+
+Both new UI pieces are thin: they render whatever the shared calculation module returns. Neither computes anything itself — that's how the headline, the line badges, and the picker can never disagree.
+
+### The Confidence Module (new, heart of the feature)
+
+A single new calculation module (`plan confidence`, alongside the existing plan engine) that:
+- takes one plant's traits + the plan's site snapshot, and returns **a band plus a list of reason codes** (machine-readable codes like "soil-mismatch" or "zone-unconfirmed" — the UI translates codes into friendly copy);
+- aggregates per-plant bands into the **headline** (majority band + exception counts);
+- owns the **rainfall-vs-moisture comparison**: the snapshot's raw annual rainfall is bucketed into low / medium / high behind named, documented thresholds, and only *opposite extremes* conflict (a dry-loving plant on a high-rainfall site, or a wet-loving plant on a low-rainfall site). Middle ground never conflicts — conservative by design.
+
+Like the plan engine, it is pure and deterministic: same inputs, same band, no I/O, no dates, no randomness — fully unit-testable, and it runs identically on the server (generation) and in the browser (live recompute while editing). Reasons live as codes, not sentences, so wording changes never touch the calculation and the "no percentages, no guarantee" rule is enforced in one copy layer.
+
+### Engine Change (ranking only)
+
+The engine's per-layer ranking gains the band as its **first** sort key, ahead of the existing native → soil → maintenance → compact → name order (which becomes the tiebreak within a band). The hard filters are untouched — the engine imports the confidence module, never the reverse. The 252-site guardrail suite must pass unchanged, plus a new test asserting a higher-band plant outranks a lower-band one in the same layer.
+
+### Data Model (plain language)
+
+**Two new optional fields on the plan snapshot** (the `plans` table, alongside the seven existing snapshot fields):
+- **Rainfall** — the site's annual rainfall (raw millimetres) at generation time. Stored raw, bucketed at read time, so tuning the thresholds later never requires touching stored plans.
+- **Location basis** — whether the site location came from GPS or a postcode centroid.
+
+Both are nullable: plans created before this feature simply have neither, and the module skips those factors — "never guess" falls out of the schema. One additive migration, applied via the dashboard SQL Editor (this project's established practice). **Nothing else is stored** — bands and reasons are always recomputed from snapshot + current plant data, never persisted, so a catalogue correction (e.g. a curator verifying an AI-inferred trait) improves existing plans' bands automatically.
+
+**Per-plant inputs come live from the catalogue** (soil compatibility, moisture, native, maintenance level, AI-origin markers) — the plan view already loads this data for display today; no new query.
+
+### What does NOT change
+- No new API routes, no new packages, no AI/n8n involvement, no RLS changes (the new columns live on `plans`, already owner-scoped).
+- PROJ-12 curation is untouched; bands are computed on the final plan lines regardless of whether curation ran. (Ranking does change the menu order the curator sees — accepted, logged.)
+- The persisted per-line `soil_flag` stays for compatibility, but the module re-derives soil match itself from the snapshot so the band never depends on a stored flag.
+
+### Dependencies
+None — everything is built with what's already installed.
+
+### Build order
+1. **/backend first** (unusual but right here): migration + confidence module + engine ranking change + snapshot persistence — all testable without UI.
+2. **/frontend second**: headline + badge + picker wiring, copy for reason codes.
 
 ## QA Test Results
 _To be added by /qa_

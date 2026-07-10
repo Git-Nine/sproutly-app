@@ -27,7 +27,7 @@
 | PROJ-10 | In-App Notifications | Planned | P1 | PROJ-5, PROJ-6 | [PROJ-10](PROJ-10-in-app-notifications.md) | 2026-06-22 |
 | PROJ-11 | Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Deployed | P1 | PROJ-1, PROJ-5 | [PROJ-11](PROJ-11-plant-catalogue-etl-floraweb.md) | 2026-07-06 |
 | PROJ-12 | AI Plan Curation & Rationale | Deployed | P1 | PROJ-6, PROJ-7 (soft: PROJ-11) | [PROJ-12](PROJ-12-ai-plan-curation-and-rationale.md) | 2026-07-07 |
-| PROJ-13 | Survival Confidence Band | Planned | P1 | PROJ-6, PROJ-7 (soft: PROJ-4, PROJ-11) | [PROJ-13](PROJ-13-survival-confidence-band.md) | 2026-07-10 |
+| PROJ-13 | Survival Confidence Band | Architected | P1 | PROJ-6, PROJ-7 (soft: PROJ-4, PROJ-11) | [PROJ-13](PROJ-13-survival-confidence-band.md) | 2026-07-10 |
 | PROJ-14 | Ecological Trait Enrichment (ETL extension) | Planned | P1 | PROJ-5, PROJ-11 | [PROJ-14](PROJ-14-ecological-trait-enrichment.md) | 2026-07-10 |
 | PROJ-15 | Biodiversity Indicator | Planned | P1 | PROJ-7, PROJ-14 | [PROJ-15](PROJ-15-biodiversity-indicator.md) | 2026-07-10 |
 
