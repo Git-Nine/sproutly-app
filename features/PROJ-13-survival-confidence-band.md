@@ -1,8 +1,8 @@
 # PROJ-13: Survival Confidence Band
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-07-10
-**Last Updated:** 2026-07-10 (frontend built — feature code-complete, ready for /qa)
+**Last Updated:** 2026-07-10 (QA passed — 17/17 ACs; see QA Test Results. Recommended: fix the two enrichment bugs (BUG-1/BUG-2, PROJ-4 root) before/with deploy)
 
 ## Dependencies
 - Requires: PROJ-6 (Rule-Based Plan Generation) — the hard filters, ranking, and plan snapshot the band is derived from
@@ -274,7 +274,93 @@ No new routes, no new packages, no shadcn additions (Card/Badge/Collapsible/Popo
 `plan-confidence-view.test.tsx` (12): chip carries the band as text (a11y); high-confidence badge lists matched factors; soil mismatch = Worth checking even for a native plant, names conflict + fix, links care tips only when notes exist; direction-specific moisture advice both ways; native offset shows band High with gap AND "locally adapted" both visible; unverified-traits + postcode gaps explained plainly; headline majority + exception counts ("9 of 11 plants · 2 worth checking"); checked-evidence line with full site data; site-gap attribution ("not in the plants"); and the copy-rule sweep — every reason code + band rendered at once, asserting no `%`, no "guarantee", no "score", no `8/10`-style numerics anywhere.
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-07-10
+**App URL:** http://localhost:3000 (unit/component/e2e harness; live Supabase schema)
+**Tester:** QA Engineer (AI)
+
+### How this feature was tested
+The band is a pure computation rendered by thin components, so the deepest coverage lives in the unit layer (module 28 tests, view copy 12, engine ranking 4, plans mapping 5, persistence 2), plus a new QA-written **PlanEditor integration test** (4 tests — the wiring no other layer covered) and a new **e2e data-layer spec** against the live schema with two seeded ephemeral accounts (7 tests). Authenticated in-browser UI flows are not e2e-covered, consistent with every prior feature (see Residual risk).
+
+### Acceptance Criteria Status — 17/17 PASS
+
+#### Band display (11/11)
+- [x] AC-1 headline near intro + per-plant bands — `plan-editor.test.tsx` (headline + one chip per line render together)
+- [x] AC-2 reasons always with the band, plain language, only evaluated factors — view tests; module skips un-evaluated factors (`plan-confidence.test.ts` skip-not-punish group)
+- [x] AC-3 all-clean plan → "High confidence" naming matched factors — view test "Checked against your sunlight, loam soil, winter zone 8 and local rainfall"
+- [x] AC-4 majority + explicit exception count, outliers identifiable — module 9-of-11 test + view test + per-line chips
+- [x] AC-5 soil mismatch → worth checking, un-offsettable, names conflict + fix — module + view (soil prep copy, care-tips link)
+- [x] AC-6 moisture conflict → worth checking with moisture-specific reason — module both directions + view direction-specific advice
+- [x] AC-7 unknown soil + native → high, "locally adapted" reason, gap still visible — module + view
+- [x] AC-8 non-native/maintenance-mismatch clean plant → high (no penalty for absent boosts) — module
+- [x] AC-9 unverified AI traits + second gap, no boost → worth checking — module
+- [x] AC-10 `moisture = null` skipped entirely — module (null and field-absent shapes)
+- [x] AC-11 no %, no score, no guarantee wording anywhere — view copy-rule sweep (all codes + bands rendered, regex assert) + module codes-are-wording-free test
+
+#### Ranking (2/2)
+- [x] AC-12 higher band outranks within layer, old order as tiebreak — `plan-engine.test.ts` (band beats native; tiebreak preserved)
+- [x] AC-13 252-site guardrail zero violations, no newly-empty plans — guardrail suite passes unchanged (hard filters untouched)
+
+#### Editing & picker (2/2)
+- [x] AC-14 every picker candidate shows its band — `plan-editor.test.tsx` (chips asserted on both candidate rows)
+- [x] AC-15 add/remove recomputes headline immediately + consistently — `plan-editor.test.tsx` (remove → headline flips to uniform high; derived-at-render means surfaces cannot diverge)
+
+#### Honest degradation (3/3)
+- [x] AC-16 partial enrichment → headline reflects gaps, site-attributed copy; enrichment-retry path untouched by this feature
+- [x] AC-17 pre-PROJ-13 plans → bands from what the snapshot holds, missing factors skipped — module null tests + e2e NULL-shape round-trip against the live schema
+- [x] AC-18 curated and fallback plans band identically — `applyCuration` builds the same snapshot (`plans-client.test.ts`); bands computed on final lines only
+
+### Edge Cases Status — all handled
+- [x] Empty plan → no headline (module returns null; editor renders nothing)
+- [x] Site-wide gap attributed to the site ("a gap in our site data, not in the plants") — view test
+- [x] Pinned plants: bands never read `pinned` (module input excludes it by type)
+- [x] Deleted/reassigned plant: replacement banded like any line (bands live-computed)
+- [x] PROJ-12 rationale coexists; deterministic band is the authoritative display
+- [x] Zone unconfirmed = headline-level gap; **legacy "isn't guaranteed" banner no longer doubles up on plans with lines** — `plan-editor.test.tsx`
+- [x] Rainfall unavailable → moisture skipped for all plants — module
+- [x] Headline tie between bands goes to the LOWER band — module + `plan-editor.test.tsx` (1 high vs 1 worth checking → worth checking headline)
+
+### Security Audit Results
+- [x] No new routes, no AI calls, no new client I/O — attack surface is two DB columns + pure client code
+- [x] Authorization: user B cannot read A's plan incl. new columns; cannot skew A's bands by updating the snapshot ("band poisoning") — new e2e spec, live schema
+- [x] Input validation at the DB: rainfall bounds (rejects −1 / 20000) and location-basis enum (rejects 'satellite') verified live
+- [x] XSS: all band/reason copy is static strings; plant-sourced text rendered as React text nodes (escaped); no `dangerouslySetInnerHTML`
+- [x] No secrets/PII in the new code; snapshot values are non-sensitive site facts
+- [x] Self-poisoning only: a user crafting own-plan snapshot writes can only distort their own display
+
+### Bugs Found
+
+#### BUG-1: Partial DWD grid failure fabricates `rainfall_mm = 0` as "successful" climate data → false "Worth checking" bands
+- **Severity:** Medium (surfaced by PROJ-13; root cause in PROJ-4 enrichment)
+- **Where:** `src/lib/enrichment/climate.ts:50` (`rainfallMm: … : 0` fallback) + `src/lib/enrichment/run.ts` (`climate_status: 'success'` whenever ANY grid sampled)
+- **Repro:** precipitation grid fetch fails/samples NODATA while min-temp or frost grid succeeds → `scan_enrichment.rainfall_mm = 0`, `climate_status = 'success'` → PROJ-13 snapshots 0 as real, buckets it "low", and every `moisture: 'wet'` plant is forced to "Worth checking" ("Likes more moisture than your area's rainfall…") from a value that was never measured — violating the feature's "never guess" principle.
+- **Expected:** unsampled grid → NULL rainfall stored (or per-field status) → PROJ-13 skips the moisture factor, exactly as designed for missing data.
+- **Priority:** Fix before deployment (small backend fix; shares its root with BUG-2)
+
+#### BUG-2: Same root fabricates `minTemp = 0` → hardiness zone '10' marked `zone_status = 'success'` — silently disables the PROJ-6 winter hard filter
+- **Severity:** High — **pre-existing since PROJ-4, in production today; discovered during this QA, not caused by PROJ-13**
+- **Where:** `climate.ts:51` (`minTemp: … : 0`) + `deriveHardinessZone(0)` → `'10'`; `run.ts` marks it success
+- **Repro:** min-temp grid fetch fails while precipitation/frost succeeds → zone '10' (mildest) stored as *confirmed* → every plant passes the zone hard filter and the UI claims "Zone 10" as fact — winter survival filtering is off while claiming certainty.
+- **Expected:** unsampled min temp → NULL zone + `zone_status: 'unavailable'` → PROJ-6's existing zone-unconfirmed path (filter suppressed *and honestly labelled*, PROJ-13 counts it as a gap).
+- **Priority:** Fix before next deployment (same fix location as BUG-1: per-field nulls in `fetchDwdClimate` + per-field status in `run.ts`)
+
+#### Observations (no action required for approval)
+- **OBS-1 (Low):** `scan_enrichment.rainfall_mm` is unconstrained while `plans.snapshot_rainfall_mm` has a 0–10000 check — a hypothetical out-of-range enrichment value would make plan *creation* fail wholesale. Fixing BUG-1 (null-not-zero) plus the existing DWD value scale makes this practically unreachable; a defensive clamp in the persist path would close it fully.
+- **OBS-2 (Info):** picker candidates are derived from *current* scan conditions but banded against the plan *snapshot* site (per spec — bands are always snapshot-sourced). On a stale plan the staleness banner already pushes regeneration; consistent, just worth knowing.
+- **OBS-3 (Info):** the legacy empty-plan zone banner still contains "isn't guaranteed" (pre-PROJ-13 copy, renders only when no bands are shown). Suggest rewording when next touched.
+
+### Regression
+- Full unit suite 399/399 (395 pre-QA + 4 new PlanEditor integration tests), incl. the 252-site guardrail matrix and all PROJ-6/7/12 suites.
+- Full e2e suite 92/92 (85 pre-existing across PROJ-2…8 + 7 new PROJ-13), chromium + Mobile Safari (iPhone 13) projects + the browser-less RLS harness against the live schema. No regressions.
+
+### Residual risk (accepted, consistent with prior features)
+Authenticated in-browser flows (the plan screen with a real session) have never been e2e-covered in this project; PROJ-13's UI is proven at the component level (real DOM via jsdom, both viewport-agnostic flex-wrap layouts). Recommend a quick human eyeball of the plan screen at 390px during `/deploy`'s smoke test.
+
+### Summary
+- **Acceptance criteria:** 17/17 passed
+- **Bugs:** 1 High (pre-existing PROJ-4, discovered here), 1 Medium (PROJ-4 root, PROJ-13 surface), 1 Low observation
+- **Security:** no findings; new columns verified under RLS + constraints against the live schema
+- **Production-ready: YES for PROJ-13 itself** (no Critical/High bugs *in this feature*). **Strong recommendation:** fix BUG-1 + BUG-2 (one small `/backend` change in enrichment) before or with the PROJ-13 deploy, since BUG-1 can make the band lie and BUG-2 already affects production plan generation.
 
 ## Deployment
 _To be added by /deploy_
