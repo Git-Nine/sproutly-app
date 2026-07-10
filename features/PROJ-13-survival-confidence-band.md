@@ -1,8 +1,8 @@
 # PROJ-13: Survival Confidence Band
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-10
-**Last Updated:** 2026-07-10 (QA passed — 17/17 ACs; see QA Test Results. Recommended: fix the two enrichment bugs (BUG-1/BUG-2, PROJ-4 root) before/with deploy)
+**Last Updated:** 2026-07-10 (deployed to production, incl. the BUG-1/BUG-2 enrichment fix)
 
 ## Dependencies
 - Requires: PROJ-6 (Rule-Based Plan Generation) — the hard filters, ranking, and plan snapshot the band is derived from
@@ -366,4 +366,16 @@ Authenticated in-browser flows (the plan screen with a real session) have never 
 - **Update 2026-07-10: BUG-1 and BUG-2 are both fixed** (`/backend`, same session — per-field nulls in `fetchDwdClimate`, honest partial status in `runEnrichment`, +2 regression tests, suite 401/401). No open bugs remain; PROJ-13 is clear to `/deploy`.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-07-10
+**Production URL:** https://sproutly-green.de (also sproutly-green.vercel.app)
+**Deployment:** `dpl_8YPHFTrAaoxrq4WLemMzii8BfAEu` (commit `b89dd94`, main → Vercel auto-deploy, build READY in ~47s)
+
+**What shipped in this push (8 commits):** the PROJ-13 backend (`9c85a34`: pure confidence module, band-first ranking, snapshot columns) + frontend (`c7b8ddd`: headline, per-plant badges, picker chips, reason copy), the QA suite (`3b55442`), the PROJ-4 enrichment fix for QA BUG-1/BUG-2 (`b89dd94`), plus four earlier never-pushed spec/PROJ-11-pipeline commits (`a2626ee`…`225321d`).
+
+**Gates & verification:**
+- Migration `20260710100000_proj13_plan_confidence_snapshot.sql` was already applied to production at /backend (2026-07-10); the QA e2e spec verified the columns, constraints, and RLS against the live schema before this deploy.
+- No new env vars, no n8n changes, no new routes — nothing to configure.
+- Pre-deploy: build + lint clean, 401/401 unit, 92/92 e2e.
+- Post-deploy: production responds correctly (`/` and plan URLs 307 → /login with returnTo, /login 200); Vercel runtime errors: none. Rollback candidate if needed: `dpl_9VcUhJxnL3DGKnEHrkVEUfyiZe28` (PR #14).
+- **Residual (carried from QA):** authenticated plan-screen eyeball at 390px — open your plan on the production URL and confirm the "Survival confidence" headline card, per-plant band chips (tap one to expand its reasons), and the band pills in the "Add more plants" picker look right.
