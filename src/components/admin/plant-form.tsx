@@ -10,6 +10,8 @@ import {
   SOIL_OPTIONS,
   MAINTENANCE_OPTIONS,
   PLANT_TYPE_OPTIONS,
+  WILDLIFE_VALUE_OPTIONS,
+  MONTH_OPTIONS,
   ZONE_OPTIONS,
   COMMON_NAME_MAX,
   LATIN_NAME_MAX,
@@ -17,11 +19,13 @@ import {
   SIZE_MIN_CM,
   SIZE_MAX_CM,
   plantSchema,
+  type EcologicalTraitField,
   type Plant,
   type SunExposure,
   type Soil,
 } from '@/lib/plants'
 import { isUniqueViolation, savePlant } from '@/lib/plants-client'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,8 +52,29 @@ type FieldKey =
   | 'plant_type'
   | 'image_url'
   | 'care_notes'
+  | 'insect_value'
+  | 'bird_value'
+  | 'bloom_start_month'
+  | 'bloom_end_month'
 
 type Errors = Partial<Record<FieldKey, string>>
+
+/**
+ * Sentinel for the ecological selects (PROJ-14): Radix Select items can't carry
+ * an empty value, and "not assessed" (→ NULL) must stay a choosable state —
+ * distinct from the real assessed values 'none'/false.
+ */
+const NOT_ASSESSED = 'not_assessed'
+
+/** Small provenance chip: this trait is still an unverified AI draft (PROJ-14). */
+function AiInferredHint({ plant, field }: { plant: Plant | null; field: EcologicalTraitField }) {
+  if (!plant?.eco_ai_origin_fields?.includes(field)) return null
+  return (
+    <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+      AI-inferred — not yet verified
+    </Badge>
+  )
+}
 
 export function PlantForm({ plant }: { plant: Plant | null }) {
   const supabase = createClient()
@@ -68,6 +93,18 @@ export function PlantForm({ plant }: { plant: Plant | null }) {
   const [native, setNative] = useState<boolean>(plant?.native ?? false)
   const [imageUrl, setImageUrl] = useState(plant?.image_url ?? '')
   const [careNotes, setCareNotes] = useState(plant?.care_notes ?? '')
+  // PROJ-14 ecological traits — select state as strings; NOT_ASSESSED ⟷ NULL.
+  const [insectValue, setInsectValue] = useState<string>(plant?.insect_value ?? NOT_ASSESSED)
+  const [birdValue, setBirdValue] = useState<string>(plant?.bird_value ?? NOT_ASSESSED)
+  const [bloomStart, setBloomStart] = useState<string>(
+    plant?.bloom_start_month != null ? String(plant.bloom_start_month) : NOT_ASSESSED,
+  )
+  const [bloomEnd, setBloomEnd] = useState<string>(
+    plant?.bloom_end_month != null ? String(plant.bloom_end_month) : NOT_ASSESSED,
+  )
+  const [pollinatorFriendly, setPollinatorFriendly] = useState<string>(
+    plant?.pollinator_friendly == null ? NOT_ASSESSED : plant.pollinator_friendly ? 'yes' : 'no',
+  )
   const [errors, setErrors] = useState<Errors>({})
   const [saving, setSaving] = useState(false)
 
@@ -93,6 +130,11 @@ export function PlantForm({ plant }: { plant: Plant | null }) {
       native,
       image_url: imageUrl,
       care_notes: careNotes,
+      insect_value: insectValue === NOT_ASSESSED ? null : insectValue,
+      bird_value: birdValue === NOT_ASSESSED ? null : birdValue,
+      bloom_start_month: bloomStart === NOT_ASSESSED ? null : Number(bloomStart),
+      bloom_end_month: bloomEnd === NOT_ASSESSED ? null : Number(bloomEnd),
+      pollinator_friendly: pollinatorFriendly === NOT_ASSESSED ? null : pollinatorFriendly === 'yes',
     })
 
     if (!parsed.success) {
@@ -278,6 +320,114 @@ export function PlantForm({ plant }: { plant: Plant | null }) {
         </div>
         <Switch id="native" checked={native} onCheckedChange={setNative} />
       </div>
+
+      <fieldset className="space-y-4 rounded-xl border border-border bg-card p-4">
+        <legend className="px-1 text-sm font-medium">Ecological traits</legend>
+        <p className="text-xs text-muted-foreground">
+          Feeds the biodiversity indicator. Verify against naturadb.de before setting —
+          leave a field “Not assessed” rather than guessing. “None” means checked and
+          genuinely no value.
+        </p>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="insect_value">Insect / pollinator value</Label>
+              <AiInferredHint plant={plant} field="insect_value" />
+            </div>
+            <Select value={insectValue} onValueChange={(v) => { setInsectValue(v); clearError('insect_value') }}>
+              <SelectTrigger id="insect_value" aria-invalid={!!errors.insect_value}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NOT_ASSESSED}>Not assessed</SelectItem>
+                {WILDLIFE_VALUE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.insect_value && <p className="text-sm text-destructive">{errors.insect_value}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="bird_value">Bird / wildlife value</Label>
+              <AiInferredHint plant={plant} field="bird_value" />
+            </div>
+            <Select value={birdValue} onValueChange={(v) => { setBirdValue(v); clearError('bird_value') }}>
+              <SelectTrigger id="bird_value" aria-invalid={!!errors.bird_value}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NOT_ASSESSED}>Not assessed</SelectItem>
+                {WILDLIFE_VALUE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.bird_value && <p className="text-sm text-destructive">{errors.bird_value}</p>}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="pollinator_friendly">Pollinator-friendly</Label>
+            <AiInferredHint plant={plant} field="pollinator_friendly" />
+          </div>
+          <Select value={pollinatorFriendly} onValueChange={setPollinatorFriendly}>
+            <SelectTrigger id="pollinator_friendly">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NOT_ASSESSED}>Not assessed</SelectItem>
+              <SelectItem value="yes">Yes</SelectItem>
+              <SelectItem value="no">No</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">Bloom period</span>
+            <AiInferredHint plant={plant} field="bloom_period" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="bloom_start_month" className="text-xs text-muted-foreground">First month</Label>
+              <Select value={bloomStart} onValueChange={(v) => { setBloomStart(v); clearError('bloom_start_month'); clearError('bloom_end_month') }}>
+                <SelectTrigger id="bloom_start_month" aria-invalid={!!errors.bloom_start_month}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NOT_ASSESSED}>Not assessed</SelectItem>
+                  {MONTH_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.bloom_start_month && <p className="text-sm text-destructive">{errors.bloom_start_month}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bloom_end_month" className="text-xs text-muted-foreground">Last month</Label>
+              <Select value={bloomEnd} onValueChange={(v) => { setBloomEnd(v); clearError('bloom_start_month'); clearError('bloom_end_month') }}>
+                <SelectTrigger id="bloom_end_month" aria-invalid={!!errors.bloom_end_month}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NOT_ASSESSED}>Not assessed</SelectItem>
+                  {MONTH_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {errors.bloom_end_month && <p className="text-sm text-destructive">{errors.bloom_end_month}</p>}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            A last month before the first is fine — it means the bloom wraps the year (e.g. November – February).
+          </p>
+        </div>
+      </fieldset>
 
       <div className="space-y-2">
         <Label htmlFor="image_url">Image URL (optional)</Label>

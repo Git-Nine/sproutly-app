@@ -1,6 +1,6 @@
 # PROJ-14: Ecological Trait Enrichment (ETL extension)
 
-## Status: Planned
+## Status: In Progress
 **Created:** 2026-07-10
 **Last Updated:** 2026-07-10
 
@@ -98,9 +98,9 @@ Ordinal bands (not raw counts) match the app's banded-honesty convention (see PR
 
 ## Open Questions
 - [ ] Exact naturadb.de field → app-band mapping for insect/bird value (their scale vs. our none/low/medium/high) — resolve during the first curator session, document the mapping like PROJ-11's.
-- [ ] Should bloom months be stored as two smallints or a single structured value? Design decision at /architecture.
-- [ ] Whether PROJ-15 should down-weight AI-inferred-but-unverified ecological traits or exclude them entirely — flagged for PROJ-15's interview; this feature just makes the provenance available.
-- [ ] Target coverage threshold before PROJ-15 is allowed to ship (e.g. ">80% of catalogue has verified wildlife value") — decide jointly when PROJ-15 is specced.
+- [x] Should bloom months be stored as two smallints or a single structured value? **Resolved (/architecture, 2026-07-10): two nullable smallint columns** (`bloom_start_month`, `bloom_end_month`), each check-constrained 1–12; year-wrap is `start > end`.
+- [ ] Whether PROJ-15 should down-weight AI-inferred-but-unverified ecological traits or exclude them entirely — flagged for PROJ-15's interview; this feature just makes the provenance available (via the separate `eco_ai_origin_fields` list).
+- [ ] Target coverage threshold before PROJ-15 is allowed to ship (e.g. ">80% of catalogue has verified wildlife value") — decide jointly when PROJ-15 is specced. First backfill prioritises wildlife values (decision, 2026-07-10), so that band is the first to reach a decidable threshold.
 
 ## Decision Log
 
@@ -115,13 +115,146 @@ Ordinal bands (not raw counts) match the app's banded-honesty convention (see PR
 | High-confidence traits still need a curator spot-check (process, not just code) | The native-flag failure was high-confidence-but-wrong; a code gate on low-confidence alone wouldn't have caught it. | 2026-07-10 |
 
 ### Technical Decisions
-_To be added by /architecture_
+| Decision | Rationale | Date |
+|----------|-----------|------|
+| Bloom period = two nullable smallint columns (`bloom_start_month`, `bloom_end_month`), each check-constrained 1–12 | Simplest stable shape; the year-wrap case (Nov→Feb) is just `start > end`, which needs no special storage — only PROJ-15's coverage maths must expect it (already noted in this spec's Edge Cases). A single structured/JSON value would add parsing with no benefit. | 2026-07-10 |
+| Wildlife values = ordinal text columns (`insect_value`, `bird_value`) with a DB check for `none/low/medium/high`; both nullable | Matches PROJ-11's pattern of a check-constrained text column (like `moisture`) and the app's banded-honesty convention (PROJ-13). `null` = not assessed, `'none'` = genuinely no value — two distinct states PROJ-15 must not conflate. | 2026-07-10 |
+| `pollinator_friendly` = nullable boolean | A flag, not a band; `null` distinguishes "not assessed" from `false` ("assessed, not pollinator-friendly"). | 2026-07-10 |
+| Ecological provenance stored in a **separate** `eco_ai_origin_fields` array, not by widening `ai_origin_fields` | Keeps the survival and ecological trust sets independent (a spec edge case: a row can be survival-verified but ecologically unverified). Critically, it lets the sync/backfill step push ecological provenance to a live row **without clobbering** any survival-trait verification a curator did earlier. Widening the single existing array would force merge logic during sync or silently reset survival provenance. | 2026-07-10 |
+| Confidence is per ecological trait (`insect_value`, `bird_value`, `bloom_period`, `pollinator_friendly`), extending the existing `confidence` block | Reuses PROJ-11's per-field confidence machinery; one confidence for the bloom pair (they're inferred together). Any ecological trait at low confidence sets the row's existing `review_required` gate — one gate, now fed by both trait sets. | 2026-07-10 |
+| Commit allows high-confidence AI-inferred ecological traits to go live (marked in `eco_ai_origin_fields`); only low-confidence blocks commit | Exactly PROJ-11's contract. The provenance column is what lets PROJ-15 later choose to down-weight/caveat AI-inferred data; the "high-confidence but wrong" failure mode is handled by the curator spot-check *process*, not a hard gate that would block the whole backfill. | 2026-07-10 |
+| Backfill via extended `SYNCABLE_FIELDS` (the 5 trait columns + `eco_ai_origin_fields`); sync guard unchanged | The `source = 'open_data_etl'`-only guard already protects hand-seeded/admin rows. Adding the ecological columns to the syncable set is the whole backfill mechanism — no new script. | 2026-07-10 |
+| Hand-seeded rows get ecological traits via an extended **admin plant-form** (user decision, 2026-07-10) | The pipeline deliberately won't touch non-ETL rows, so the 2 hand-seeded plants need a manual path; the admin edit form is the honest place for it, and PROJ-15 needs the same form fields regardless. | 2026-07-10 |
+| First backfill prioritises **wildlife values** (insect/bird + pollinator flag), bloom months follow (user decision, 2026-07-10) | Those three are PROJ-15's headline-claim inputs; verifying them first maximises useful coverage per curator hour. Bloom-season coverage is secondary and can trail. | 2026-07-10 |
 
 ---
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+> **Audience note:** this is a data-pipeline / curator feature with no end-user runtime surface (that's PROJ-15). It extends the existing PROJ-11 import pipeline rather than adding a parallel one, so the design below is mostly "which existing part gets a bit more, and why" — deliberately small and additive.
+
+### A) Where the work lands (module / data-flow map)
+
+The PROJ-11 pipeline has three stages the curator already runs. PROJ-14 threads five new ecological traits through the same three stages plus one manual side-door for the hand-seeded rows:
+
+```
+STEP 1  Generate & stage   (npm run import:plants)
+  Open-data identity  ─┐
+  AI trait inference  ─┼─► now ALSO drafts the 5 ecological traits
+                       │    + a confidence rating for each
+                       └─► writes them into the YAML staging file,
+                            low-confidence rows flagged REVIEW REQUIRED
+
+STEP 2  Curator review      (edit the YAML by hand)
+  Check each ecological trait against naturadb.de
+  Correct any value; remove verified traits from the row's
+  ecological-provenance list; set approved: true
+
+STEP 3a Commit new rows     (npm run import:plants:commit)
+  Approved, review-cleared rows written to public.plants
+  (unchanged gate: low-confidence still can't commit)
+
+STEP 3b Sync existing rows  (npm run import:plants:sync)   ◄── the backfill
+  Pushes verified ecological traits onto the ~160 live
+  open_data_etl rows (never touches seed/admin rows)
+  + reports ecological-trait coverage
+
+SIDE DOOR  Admin plant-form  (/admin/plants → edit)
+  New "Ecological traits" section so an admin can set the 5
+  fields on the 2 hand-seeded rows the pipeline won't touch
+```
+
+Files that grow (no new pipeline modules):
+- `scripts/lib/catalogue.mjs` — the shared vocabulary/validation: new ecological enums, extend the row schema, the confidence schema, the review gate, `SYNCABLE_FIELDS`, and the new coverage report helper.
+- `scripts/lib/ai-traits.mjs` — the AI now returns the 5 ecological traits + their confidence (structured-output schema + prompt).
+- `scripts/import-plants-sync.mjs` — print the coverage report at the end of a run.
+- `supabase/migrations/…proj14_plants_ecological_traits.sql` — the additive columns.
+- `src/lib/plants.ts` + `src/components/admin/plant-form.tsx` — the admin-form side door.
+
+### B) Data model (plain language)
+
+Five new pieces of information per plant, all **nullable** (nothing is backfilled by the migration; existing rows and every PROJ-6 read keep working):
+
+```
+Each plant additionally has:
+- Insect / pollinator value   one of: none · low · medium · high   (null = not assessed)
+- Bird / wildlife value       one of: none · low · medium · high   (null = not assessed)
+- Bloom start month           1–12   (null = not assessed / non-flowering)
+- Bloom end month             1–12   (null; may be < start for a winter bloomer that wraps the year)
+- Pollinator-friendly         yes / no   (null = not assessed)
+
+Provenance (which of the above are still an AI guess vs. human-verified):
+- Ecological-origin list      kept SEPARATE from the existing survival-origin list,
+                              so verifying a wildlife value never disturbs an earlier
+                              survival-trait verification.
+```
+
+Two states that must stay distinct downstream: **null** ("we haven't assessed this") and **none/false** ("we assessed it — the answer is genuinely nothing"). The database check constraints allow `none` as a real value; the columns stay nullable so "not assessed" remains representable.
+
+Stored in: the existing `public.plants` table (Supabase Postgres). No new table, no RLS change — the PROJ-5 policies (all authenticated read, admins write) already cover new columns.
+
+### C) Tech decisions justified (for a PM)
+
+- **Extend the pipeline, don't fork it.** Every ecological trait rides the exact `generate → review → commit → sync` path the catalogue already trusts. Less to build, and the hard-won review discipline (nothing AI-inferred goes live unverified-and-unmarked) is inherited for free rather than re-implemented.
+- **AI drafts, a human signs off — same rule as the native flag.** The GBIF native flag was wrong ~40% of the time, twice. These traits feed a *persuasion* metric (PROJ-15's biodiversity claim), so the bar is the same: the AI produces a confident draft, low-confidence forces mandatory review, and everything AI-inferred is marked so it can be re-checked or down-weighted later. High-confidence-but-wrong is caught by a curator spot-check habit, not pretended away.
+- **A separate provenance list for ecological traits.** The single most important structural choice: it means the backfill can push wildlife values onto a live plant without accidentally un-verifying a survival trait a curator fixed months earlier. Independent trust sets, independent tracking.
+- **Bands, not numbers.** Wildlife value is none/low/medium/high, never a count — matching the app's honesty convention and what naturadb.de can actually support.
+- **The migration changes nothing that already works.** All columns nullable, no backfill in the migration, the plan engine (PROJ-6) never reads them — so plans generated after this ships are byte-identical to before.
+- **Coverage is reported, never assumed.** Every live sync run prints how many rows now have verified wildlife values and how many are still null, so the PROJ-15 ship decision is made on real numbers, not a hope that "most" plants are covered.
+
+### D) Dependencies (packages)
+
+None new. Reuses the existing stack: `@anthropic-ai/sdk` (trait inference), `@supabase/supabase-js` (service-role reads/writes), `zod` (validation), `yaml` (staging file). No new env vars beyond the existing n8n/Anthropic ETL config.
+
+## Implementation Notes — Frontend (2026-07-10, /frontend)
+
+This feature's only UI surface is the tech design's **side door**: the admin plant-form
+"Ecological traits" section, so hand-seeded rows (and any admin correction) have a manual
+path for the five traits the pipeline deliberately won't touch. Everything else in PROJ-14
+(migration, ETL inference, review gate, sync backfill, coverage report) is `/backend`.
+
+**`src/lib/plants.ts` — the shared contract, extended:**
+- `WILDLIFE_VALUE_OPTIONS` (`none/low/medium/high` + labels), `MONTH_OPTIONS` (1–12 + names),
+  `ECOLOGICAL_TRAIT_FIELDS` (`insect_value`, `bird_value`, `bloom_period`, `pollinator_friendly`)
+  — the allowed contents of the **separate** `eco_ai_origin_fields` provenance array, with the
+  bloom pair tracked as one entry (`bloom_period`) since the months are inferred together.
+- `Plant` type + `plantSchema` gain the 5 columns + `eco_ai_origin_fields`, all
+  **nullable + optional** (every existing row and caller keeps validating — the additive
+  contract). Vocabulary enums derive from the option arrays via `optionValues()` per the
+  one-soil-vocabulary convention.
+- Cross-field rule (`superRefine`): the bloom pair is **both-or-neither** — a half-set pair
+  fails with a field-level error. `end < start` is deliberately VALID (year-wrap, Nov→Feb).
+- Helpers: `wildlifeValueLabel`, `monthLabel`, `bloomPeriodSummary` ("November – February
+  (over winter)") — ready for PROJ-15's display layer.
+
+**`src/components/admin/plant-form.tsx` — the "Ecological traits" fieldset** (after the
+native switch): insect + bird value selects, pollinator-friendly select, bloom first/last
+month selects. Design decisions:
+- Every select includes an explicit **"Not assessed"** item (sentinel `not_assessed` ⟷ NULL;
+  Radix Select can't carry an empty value) and defaults to it — the honest default is a NULL,
+  never a guessed value. Pollinator-friendly is a tri-state select (Not assessed / Yes / No),
+  not a Switch, because `null` ≠ `false` here.
+- Traits listed in the row's `eco_ai_origin_fields` show an **"AI-inferred — not yet
+  verified"** chip next to their label, so an admin editing an ETL row sees which values are
+  still unverified drafts. The form does not auto-mutate provenance (matching the existing
+  form's treatment of `ai_origin_fields`); clearing provenance stays a pipeline/curator step.
+- Section copy states the trust rule: verify against naturadb.de, leave "Not assessed" rather
+  than guess, "None" = checked and genuinely no value. A hint under the bloom pair explains
+  that last-before-first means a year-wrapping bloom.
+
+**Tests:** `plants.test.ts` +11 (vocabulary accept/reject, null vs `none`/`false` distinct,
+month bounds, wrap valid, half-pair rejected with the right field error, provenance
+vocabulary, label/summary helpers) and new co-located `plant-form.test.tsx` +5 (not-assessed
+defaults, untouched traits persist as NULL, assessed values incl. wrap round-trip, provenance
+chips only on listed traits, half-set bloom pair blocks save). Suite 401 → 417 green; lint +
+production build clean.
+
+**⚠️ Staged-flow caveat (same as PROJ-5's):** `savePlant` spreads the validated values, so
+the admin form now includes the five ecological columns in every insert/update. **Any plant
+save via the admin form will error against the live DB until the PROJ-14 migration is
+applied** — `/backend` (migration + pipeline) is the immediate next step and must land before
+this reaches production.
 
 ## QA Test Results
 _To be added by /qa_

@@ -35,6 +35,50 @@ export const SURVIVAL_CRITICAL_FIELDS = [
 export type SurvivalCriticalField = (typeof SURVIVAL_CRITICAL_FIELDS)[number]
 
 /**
+ * Ecological traits (PROJ-14). Provenance for these lives in the SEPARATE
+ * `plants.eco_ai_origin_fields` array — never in `ai_origin_fields` — so a row's
+ * survival-trait verification and its ecological verification stay independent.
+ * The bloom pair is tracked as one entry (`bloom_period`): the two months are
+ * inferred (and verified) together.
+ */
+export const ECOLOGICAL_TRAIT_FIELDS = [
+  'insect_value',
+  'bird_value',
+  'bloom_period',
+  'pollinator_friendly',
+] as const
+export type EcologicalTraitField = (typeof ECOLOGICAL_TRAIT_FIELDS)[number]
+
+/**
+ * Ordinal wildlife-value bands (PROJ-14): `none` is a real assessed value
+ * (e.g. a wind-pollinated grass) — distinct from a NULL column ("not assessed").
+ */
+export const WILDLIFE_VALUE_OPTIONS = [
+  { value: 'none', label: 'None' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+] as const
+export type WildlifeValue = (typeof WILDLIFE_VALUE_OPTIONS)[number]['value']
+
+export const BLOOM_MONTH_MIN = 1
+export const BLOOM_MONTH_MAX = 12
+export const MONTH_OPTIONS = [
+  { value: 1, label: 'January' },
+  { value: 2, label: 'February' },
+  { value: 3, label: 'March' },
+  { value: 4, label: 'April' },
+  { value: 5, label: 'May' },
+  { value: 6, label: 'June' },
+  { value: 7, label: 'July' },
+  { value: 8, label: 'August' },
+  { value: 9, label: 'September' },
+  { value: 10, label: 'October' },
+  { value: 11, label: 'November' },
+  { value: 12, label: 'December' },
+] as const
+
+/**
  * Structural planting layers (PROJ-6). Drives the ~60/30/10 layered plan
  * composition and the grouped plan view (Trees · Shrubs · Perennials · Groundcovers).
  */
@@ -88,6 +132,15 @@ export type Plant = {
   image_license?: string | null
   source?: string | null
   ai_origin_fields?: SurvivalCriticalField[] | null
+  // PROJ-14 ecological traits — nullable/optional like the PROJ-11 block above.
+  // NULL means "not assessed"; `'none'`/`false` mean "assessed, genuinely nothing".
+  // A bloom period with end < start is a valid year-wrap (e.g. Nov → Feb).
+  insect_value?: WildlifeValue | null
+  bird_value?: WildlifeValue | null
+  bloom_start_month?: number | null
+  bloom_end_month?: number | null
+  pollinator_friendly?: boolean | null
+  eco_ai_origin_fields?: EcologicalTraitField[] | null
   created_at: string
   updated_at: string | null
 }
@@ -174,6 +227,45 @@ export const plantSchema = z.object({
     .nullable()
     .optional(),
   ai_origin_fields: z.array(z.enum(SURVIVAL_CRITICAL_FIELDS)).nullable().optional(),
+  // PROJ-14 ecological traits. Nullable + optional for the same reason as the
+  // PROJ-11 block: every existing row (and every caller that doesn't edit them)
+  // keeps validating. NULL = not assessed; 'none'/false = assessed, no value.
+  insect_value: z
+    .enum(optionValues(WILDLIFE_VALUE_OPTIONS), { message: 'Choose a wildlife value' })
+    .nullable()
+    .optional(),
+  bird_value: z
+    .enum(optionValues(WILDLIFE_VALUE_OPTIONS), { message: 'Choose a wildlife value' })
+    .nullable()
+    .optional(),
+  bloom_start_month: z
+    .number({ message: 'Choose a month' })
+    .int('Use a whole month (1–12)')
+    .min(BLOOM_MONTH_MIN, 'Months run 1–12')
+    .max(BLOOM_MONTH_MAX, 'Months run 1–12')
+    .nullable()
+    .optional(),
+  bloom_end_month: z
+    .number({ message: 'Choose a month' })
+    .int('Use a whole month (1–12)')
+    .min(BLOOM_MONTH_MIN, 'Months run 1–12')
+    .max(BLOOM_MONTH_MAX, 'Months run 1–12')
+    .nullable()
+    .optional(),
+  pollinator_friendly: z.boolean().nullable().optional(),
+  eco_ai_origin_fields: z.array(z.enum(ECOLOGICAL_TRAIT_FIELDS)).nullable().optional(),
+}).superRefine((v, ctx) => {
+  // The bloom period is one fact stored as two columns: set both or neither.
+  // end < start is deliberately VALID — a winter bloomer wrapping the year (Nov→Feb).
+  const start = v.bloom_start_month ?? null
+  const end = v.bloom_end_month ?? null
+  if ((start === null) !== (end === null)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: [start === null ? 'bloom_start_month' : 'bloom_end_month'],
+      message: 'Set both bloom months, or leave both unassessed',
+    })
+  }
 })
 export type PlantValues = z.infer<typeof plantSchema>
 
@@ -192,11 +284,34 @@ const PLANT_TYPE_PLURALS = Object.fromEntries(
   PLANT_TYPE_OPTIONS.map((o) => [o.value, o.plural]),
 ) as Record<PlantType, string>
 
+const WILDLIFE_VALUE_LABELS = Object.fromEntries(
+  WILDLIFE_VALUE_OPTIONS.map((o) => [o.value, o.label]),
+) as Record<WildlifeValue, string>
+const MONTH_LABELS = Object.fromEntries(
+  MONTH_OPTIONS.map((o) => [o.value, o.label]),
+) as Record<number, string>
+
 export const soilLabel = (v: Soil) => SOIL_LABELS[v] ?? v
 export const moistureLabel = (v: Moisture) => MOISTURE_LABELS[v] ?? v
 export const maintenanceLabel = (v: MaintenanceLevel) => MAINTENANCE_LABELS[v] ?? v
 export const plantTypeLabel = (v: PlantType) => PLANT_TYPE_LABELS[v] ?? v
 export const plantTypePlural = (v: PlantType) => PLANT_TYPE_PLURALS[v] ?? v
+export const wildlifeValueLabel = (v: WildlifeValue) => WILDLIFE_VALUE_LABELS[v] ?? v
+export const monthLabel = (m: number) => MONTH_LABELS[m] ?? String(m)
+
+/**
+ * "May – September", "November – February (over winter)" — human summary of a
+ * bloom pair; the wrap annotation keeps end-before-start from reading like a typo.
+ * Null when the period is not assessed (either month missing).
+ */
+export function bloomPeriodSummary(
+  start: number | null | undefined,
+  end: number | null | undefined,
+): string | null {
+  if (start == null || end == null) return null
+  const base = `${monthLabel(start)} – ${monthLabel(end)}`
+  return end < start ? `${base} (over winter)` : base
+}
 
 /** "Full sun · Partial sun" — the joined human labels for a plant's tolerated set. */
 export function sunToleranceSummary(values: SunExposure[]): string {
