@@ -20,7 +20,23 @@ import { fileURLToPath } from 'node:url'
 import { createClient } from '@supabase/supabase-js'
 import { PLANTS_TABLE_NAME, DEFAULT_STAGING_PATH } from './lib/config.mjs'
 import { parseStagingFile } from './lib/staging.mjs'
-import { stagedRowSchema, planSync, SYNCABLE_FIELDS } from './lib/catalogue.mjs'
+import {
+  stagedRowSchema,
+  planSync,
+  SYNCABLE_FIELDS,
+  ECOLOGICAL_TRAIT_FIELDS,
+  ecologicalCoverageReport,
+} from './lib/catalogue.mjs'
+
+/** Columns the coverage report reads — the raw ecological columns + provenance. */
+const ECO_COVERAGE_COLUMNS = [
+  'insect_value',
+  'bird_value',
+  'bloom_start_month',
+  'bloom_end_month',
+  'pollinator_friendly',
+  'eco_ai_origin_fields',
+]
 
 function requireEnv() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -79,6 +95,8 @@ async function main() {
   console.log(`Staged rows read:         ${rawRows.length}`)
   console.log(`Updated:                  ${updated}`)
   console.log(`Skipped — unapproved:     ${plan.skippedUnapproved.length}`)
+  console.log(`Skipped — needs review:   ${plan.skippedReview.length}`)
+  if (plan.skippedReview.length) console.log(`    ${plan.skippedReview.join(', ')}`)
   console.log(`Skipped — not live yet:   ${plan.skippedNotFound.length}`)
   console.log(`Skipped — not ETL-owned:  ${plan.skippedNotEtlOwned.length}`)
   if (plan.skippedNotEtlOwned.length) console.log(`    ${plan.skippedNotEtlOwned.join(', ')}`)
@@ -91,6 +109,25 @@ async function main() {
     process.exit(1)
   }
   console.log(`\nDone. ${updated} existing plant(s) synced with staged corrections.`)
+
+  // Ecological-trait coverage over the LIVE catalogue, read fresh AFTER the updates so
+  // the PROJ-15 ship decision is made on real numbers (spec: no silent partial coverage).
+  const { data: coverageRows, error: coverageErr } = await supabase
+    .from(PLANTS_TABLE_NAME)
+    .select(ECO_COVERAGE_COLUMNS.join(', '))
+  if (coverageErr) {
+    console.error(`\nCoverage report unavailable: ${coverageErr.message}`)
+    return
+  }
+  const coverage = ecologicalCoverageReport(coverageRows ?? [])
+  console.log('\n─── Ecological-trait coverage (live catalogue) ───')
+  console.log(`Catalogue size: ${coverage.total} plant(s)`)
+  for (const field of ECOLOGICAL_TRAIT_FIELDS) {
+    const c = coverage.counts[field]
+    console.log(
+      `  ${field.padEnd(20)} verified ${c.verified}, AI-inferred ${c.aiInferred}, not assessed ${c.notAssessed}`,
+    )
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

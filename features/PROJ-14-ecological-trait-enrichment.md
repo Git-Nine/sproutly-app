@@ -256,6 +256,72 @@ save via the admin form will error against the live DB until the PROJ-14 migrati
 applied** — `/backend` (migration + pipeline) is the immediate next step and must land before
 this reaches production.
 
+## Implementation Notes — Backend (2026-07-10, /backend)
+
+The pipeline half of the feature — everything except the admin-form side door (built at
+`/frontend`). No API route: PROJ-14 has no runtime surface (that's PROJ-15); it extends the
+offline `generate → commit → sync` scripts and their pure, unit-tested contract in
+`scripts/lib/`. All additive, backward-compatible — the plan engine (PROJ-6) never reads the
+new columns, so plans generated after this ships are byte-identical to before.
+
+**Migration `20260710110000_proj14_plants_ecological_traits.sql`** — six additive, nullable
+columns on `public.plants`: `insect_value` / `bird_value` (text, `check none/low/medium/high`),
+`bloom_start_month` / `bloom_end_month` (smallint, `check 1–12`), `pollinator_friendly`
+(boolean), and the **separate** `eco_ai_origin_fields` (text[], `check <@` the 4 ecological
+field names). Plus a guarded (`do $$…`, idempotent) cross-column constraint
+`plants_bloom_pair_both_or_neither` enforcing the both-or-neither bloom rule at the DB. Nothing
+backfilled; no RLS change (PROJ-5 policies already cover new columns). `none`/`false` are real
+assessed values, kept distinct from NULL ("not assessed") — the two states PROJ-15 must not
+conflate.
+**⚠️ Deploy gate — apply via the Supabase dashboard SQL Editor** (this project doesn't use CLI
+migration history). Until it lands, admin plant saves error against live (the frontend now sends
+these columns on every save). No env vars, no n8n change.
+
+**`scripts/lib/catalogue.mjs`** — the shared contract, extended and kept locked to
+`@/lib/plants` by `catalogue.test.ts`:
+- New vocab: `WILDLIFE_VALUE_VALUES`, `BLOOM_MONTH_MIN/MAX`, `ECOLOGICAL_TRAIT_FIELDS`
+  (mirrors the app; bloom pair = one `bloom_period` entry), `CONFIDENCE_FIELDS` (survival + eco).
+- `importPlantSchema` gains the 5 columns + `eco_ai_origin_fields`. insect/bird/pollinator are
+  **required** (the AI always assesses them — a missing/out-of-vocab value fails loudly, no
+  silent default); the bloom pair is nullable + both-or-neither (`end < start` = valid wrap).
+- `confidenceSchema` gains 4 eco keys (`insect_value`, `bird_value`, `bloom_period`,
+  `pollinator_friendly`). `lowConfidenceFields`/`needsMandatoryReview` now scan **both** trait
+  sets → **one** `review_required` gate fed by survival AND ecological low-confidence.
+- `buildStagedRow` copies the eco values through and seeds `eco_ai_origin_fields` with all four
+  (every trait starts an AI draft), kept independent of `ai_origin_fields`.
+- **`SYNCABLE_FIELDS`** extended with the 5 eco columns + `eco_ai_origin_fields` — this is the
+  whole backfill mechanism. `ai_origin_fields` is deliberately NOT syncable, so pushing eco
+  provenance never disturbs a survival verification. New order-insensitive array comparison
+  (`syncFieldEqual`) so `eco_ai_origin_fields` in a different order isn't seen as a change.
+- `planSync` now also skips `review_required` rows (an unverified low-confidence trait must
+  never reach a live row — same gate as commit) → new `skippedReview` bucket.
+- New `ecologicalCoverageReport(rows)` — per-trait verified / AI-inferred / not-assessed counts
+  (a trait is *verified* only when set AND absent from `eco_ai_origin_fields`; bloom counts as
+  assessed only when both months set).
+
+**`scripts/lib/ai-traits.mjs`** — `aiTraitsSchema` + `traitsJsonSchema` return the 5 eco traits
+(bands enum-locked, bloom months `['integer','null']`, both-or-neither via superRefine) and the
+4 eco confidence ratings; system prompt gained an "Ecological traits" block (bands, the year-wrap
+rule, null-both for non-flowering, honest confidence).
+
+**`scripts/import-plants-sync.mjs`** — prints the ecological-coverage report over a fresh read of
+the live catalogue **after** the updates apply (spec: no silent partial coverage), plus the new
+`skippedReview` line. **`scripts/lib/staging.mjs`** — curator HOW-TO-REVIEW header now covers the
+eco fields, naturadb.de verification, the high-confidence spot-check habit, and clearing
+`eco_ai_origin_fields`. `import-plants.mjs` needed no change (traits flow through `buildStagedRow`).
+
+**Tests:** `catalogue.test.ts` +18 (vocab/field-list parity, eco schema accept/reject, `none`≠null,
+bloom bounds + wrap + half-pair, provenance vocabulary, one-gate review from either set, separate
+eco provenance array, sync eco-backfill + order-insensitive idempotency + review-gate skip +
+`ai_origin_fields`-never-synced, coverage report) and `ai-traits.test.ts` +5 (eco traits returned,
+`none`/null-bloom accepted, out-of-vocab band + half-pair rejected, json_schema eco enums). Full
+suite **417 → 440 green**, lint + production build clean.
+
+**Remaining (curator + deploy, out of code scope):** apply the migration (dashboard SQL Editor);
+run the live pipeline (`import:plants` → curator review against naturadb.de, wildlife values first
+per the decision log → `import:plants:commit` → `import:plants:sync` backfill) and record the
+first naturadb.de field → band mapping (Open Question) + the reported coverage. `/qa` next.
+
 ## QA Test Results
 _To be added by /qa_
 

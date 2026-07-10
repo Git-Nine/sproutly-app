@@ -5,6 +5,8 @@ import {
   MOISTURE_VALUES,
   MAINTENANCE_VALUES,
   PLANT_TYPE_VALUES,
+  WILDLIFE_VALUE_VALUES,
+  ECOLOGICAL_TRAIT_FIELDS as SCRIPT_ECO,
   SURVIVAL_CRITICAL_FIELDS as SCRIPT_SCF,
   ZONE_MIN,
   ZONE_MAX,
@@ -19,6 +21,7 @@ import {
   planCommit,
   planSync,
   toPlantRow,
+  ecologicalCoverageReport,
 } from './catalogue.mjs'
 import {
   SUN_OPTIONS,
@@ -26,6 +29,8 @@ import {
   MOISTURE_OPTIONS,
   MAINTENANCE_OPTIONS,
   PLANT_TYPE_OPTIONS,
+  WILDLIFE_VALUE_OPTIONS,
+  ECOLOGICAL_TRAIT_FIELDS,
   SURVIVAL_CRITICAL_FIELDS,
   ZONE_MIN as APP_ZONE_MIN,
   ZONE_MAX as APP_ZONE_MAX,
@@ -47,12 +52,14 @@ describe('catalogue vocabulary parity with @/lib/plants', () => {
     expect(MOISTURE_VALUES).toEqual(optionValues(MOISTURE_OPTIONS))
     expect(MAINTENANCE_VALUES).toEqual(optionValues(MAINTENANCE_OPTIONS))
     expect(PLANT_TYPE_VALUES).toEqual(optionValues(PLANT_TYPE_OPTIONS))
+    expect(WILDLIFE_VALUE_VALUES).toEqual(optionValues(WILDLIFE_VALUE_OPTIONS))
   })
 
-  it('mirrors numeric bounds and survival-critical fields', () => {
+  it('mirrors numeric bounds and trait-field lists', () => {
     expect([ZONE_MIN, ZONE_MAX]).toEqual([APP_ZONE_MIN, APP_ZONE_MAX])
     expect([SIZE_MIN_CM, SIZE_MAX_CM]).toEqual([APP_SIZE_MIN, APP_SIZE_MAX])
     expect(SCRIPT_SCF).toEqual([...SURVIVAL_CRITICAL_FIELDS])
+    expect(SCRIPT_ECO).toEqual([...ECOLOGICAL_TRAIT_FIELDS])
   })
 })
 
@@ -66,11 +73,20 @@ const VALID_TRAITS = {
   maintenance_level: 'low',
   plant_type: 'perennial',
   care_notes: 'Easy border perennial for German gardens.',
+  insect_value: 'high',
+  bird_value: 'low',
+  bloom_start_month: 5,
+  bloom_end_month: 9,
+  pollinator_friendly: true,
   confidence: {
     sun_tolerance: 'high',
     soil_compatibility: 'high',
     moisture: 'high',
     min_hardiness_zone: 'medium',
+    insect_value: 'high',
+    bird_value: 'medium',
+    bloom_period: 'high',
+    pollinator_friendly: 'high',
   },
 }
 
@@ -104,6 +120,52 @@ describe('importPlantSchema', () => {
   })
 })
 
+describe('importPlantSchema — ecological traits (PROJ-14)', () => {
+  const ecoRow = (overrides: Record<string, unknown> = {}) => ({
+    ...toPlantRow(buildStagedRow({ identity: IDENTITY, traits: VALID_TRAITS, status: 'new' })),
+    ...overrides,
+  })
+
+  it('accepts a valid ecological row and the app plantSchema also accepts it', () => {
+    const row = ecoRow()
+    expect(importPlantSchema.safeParse(row).success).toBe(true)
+    expect(plantSchema.safeParse(row).success).toBe(true)
+  })
+
+  it("allows 'none' as a real assessed wildlife value (distinct from null / not assessed)", () => {
+    expect(importPlantSchema.safeParse(ecoRow({ insect_value: 'none', bird_value: 'none' })).success).toBe(true)
+  })
+
+  it('rejects an out-of-vocabulary wildlife band (no silent default)', () => {
+    expect(importPlantSchema.safeParse(ecoRow({ insect_value: 'huge' })).success).toBe(false)
+  })
+
+  it('requires insect/bird value + pollinator flag (a missing one fails loudly)', () => {
+    const row = ecoRow()
+    delete (row as Record<string, unknown>).insect_value
+    expect(importPlantSchema.safeParse(row).success).toBe(false)
+  })
+
+  it('accepts a null bloom pair (non-flowering) but rejects a half-set pair', () => {
+    expect(importPlantSchema.safeParse(ecoRow({ bloom_start_month: null, bloom_end_month: null })).success).toBe(true)
+    expect(importPlantSchema.safeParse(ecoRow({ bloom_start_month: 5, bloom_end_month: null })).success).toBe(false)
+  })
+
+  it('treats end < start as a valid year-wrap (Nov → Feb)', () => {
+    expect(importPlantSchema.safeParse(ecoRow({ bloom_start_month: 11, bloom_end_month: 2 })).success).toBe(true)
+  })
+
+  it('rejects a bloom month out of the 1–12 range', () => {
+    expect(importPlantSchema.safeParse(ecoRow({ bloom_start_month: 0 })).success).toBe(false)
+    expect(importPlantSchema.safeParse(ecoRow({ bloom_end_month: 13 })).success).toBe(false)
+  })
+
+  it('constrains eco_ai_origin_fields to the ecological vocabulary', () => {
+    expect(importPlantSchema.safeParse(ecoRow({ eco_ai_origin_fields: ['moisture'] })).success).toBe(false)
+    expect(importPlantSchema.safeParse(ecoRow({ eco_ai_origin_fields: ['bloom_period'] })).success).toBe(true)
+  })
+})
+
 describe('buildStagedRow', () => {
   it('records provenance and starts unapproved', () => {
     const row = buildStagedRow({ identity: IDENTITY, traits: VALID_TRAITS, status: 'new' })
@@ -113,22 +175,65 @@ describe('buildStagedRow', () => {
     expect(row.status).toBe('new')
   })
 
+  it('records ecological provenance in the SEPARATE eco_ai_origin_fields array', () => {
+    const row = buildStagedRow({ identity: IDENTITY, traits: VALID_TRAITS, status: 'new' })
+    expect(row.eco_ai_origin_fields).toEqual([...ECOLOGICAL_TRAIT_FIELDS])
+    // ecological and survival provenance are independent lists — no overlap.
+    expect(row.eco_ai_origin_fields).not.toEqual(row.ai_origin_fields)
+  })
+
+  it('copies through the ecological trait values, defaulting an absent bloom pair to null', () => {
+    const noBloom = { ...VALID_TRAITS }
+    delete (noBloom as Record<string, unknown>).bloom_start_month
+    delete (noBloom as Record<string, unknown>).bloom_end_month
+    const row = buildStagedRow({ identity: IDENTITY, traits: noBloom, status: 'new' })
+    expect(row.insect_value).toBe('high')
+    expect(row.pollinator_friendly).toBe(true)
+    expect(row.bloom_start_month).toBeNull()
+    expect(row.bloom_end_month).toBeNull()
+  })
+
   it('flags mandatory review when a survival-critical field is low confidence', () => {
     const lowConf = { ...VALID_TRAITS, confidence: { ...VALID_TRAITS.confidence, moisture: 'low' } }
     const row = buildStagedRow({ identity: IDENTITY, traits: lowConf, status: 'new' })
     expect(row.review_required).toBe(true)
   })
 
-  it('does not flag review when all survival-critical fields are medium+ confidence', () => {
+  it('flags mandatory review when an ECOLOGICAL field is low confidence (one gate, both sets)', () => {
+    const lowEco = { ...VALID_TRAITS, confidence: { ...VALID_TRAITS.confidence, insect_value: 'low' } }
+    const row = buildStagedRow({ identity: IDENTITY, traits: lowEco, status: 'new' })
+    expect(row.review_required).toBe(true)
+  })
+
+  it('does not flag review when all survival + ecological fields are medium+ confidence', () => {
     const row = buildStagedRow({ identity: IDENTITY, traits: VALID_TRAITS, status: 'new' })
     expect(row.review_required).toBe(false)
   })
 })
 
 describe('needsMandatoryReview', () => {
-  it('is true only when at least one survival-critical field is low', () => {
-    expect(needsMandatoryReview({ sun_tolerance: 'medium', soil_compatibility: 'high', moisture: 'high', min_hardiness_zone: 'high' })).toBe(false)
-    expect(needsMandatoryReview({ sun_tolerance: 'low', soil_compatibility: 'high', moisture: 'high', min_hardiness_zone: 'high' })).toBe(true)
+  const conf = (overrides: Record<string, string> = {}) => ({
+    sun_tolerance: 'high',
+    soil_compatibility: 'high',
+    moisture: 'high',
+    min_hardiness_zone: 'high',
+    insect_value: 'high',
+    bird_value: 'high',
+    bloom_period: 'high',
+    pollinator_friendly: 'high',
+    ...overrides,
+  })
+
+  it('is false when every trait is medium+ confidence', () => {
+    expect(needsMandatoryReview(conf())).toBe(false)
+  })
+
+  it('is true when a survival-critical field is low', () => {
+    expect(needsMandatoryReview(conf({ sun_tolerance: 'low' }))).toBe(true)
+  })
+
+  it('is true when an ecological field is low', () => {
+    expect(needsMandatoryReview(conf({ bloom_period: 'low' }))).toBe(true)
   })
 })
 
@@ -199,13 +304,69 @@ describe('planSync', () => {
     approved: true,
     ...overrides,
   })
+  // The live-row values that MATCH a staged VALID_TRAITS row on every eco column, so a
+  // test can isolate a single differing field. eco_ai_origin_fields is deliberately in
+  // a different order to prove the array comparison is order-insensitive.
+  const ecoInSync = {
+    insect_value: 'high',
+    bird_value: 'low',
+    bloom_start_month: 5,
+    bloom_end_month: 9,
+    pollinator_friendly: true,
+    eco_ai_origin_fields: ['bloom_period', 'insect_value', 'pollinator_friendly', 'bird_value'],
+  }
 
-  it('updates only syncable fields on an approved, ETL-owned, already-changed row', () => {
+  it('updates only the changed syncable field on an approved, ETL-owned row', () => {
     const rows = [staged({ latin_name: 'Corrected', common_name: 'Neuer Name' })]
-    const existing = [{ latin_name: 'Corrected', common_name: 'Alter Name', source: IMPORT_SOURCE }]
+    const existing = [
+      { latin_name: 'Corrected', common_name: 'Alter Name', source: IMPORT_SOURCE, ...ecoInSync },
+    ]
     const plan = planSync(rows, existing)
     expect(plan.toUpdate).toEqual([{ latin_name: 'Corrected', changes: { common_name: 'Neuer Name' } }])
     expect(SYNCABLE_FIELDS).toContain('common_name')
+  })
+
+  it('backfills the ecological columns onto a live row that has none (nulls → verified values)', () => {
+    const rows = [staged({ latin_name: 'Salvia nemorosa', common_name: 'Steppen-Salbei' })]
+    const existing = [
+      {
+        latin_name: 'Salvia nemorosa',
+        common_name: 'Steppen-Salbei',
+        source: IMPORT_SOURCE,
+        insect_value: null,
+        bird_value: null,
+        bloom_start_month: null,
+        bloom_end_month: null,
+        pollinator_friendly: null,
+        eco_ai_origin_fields: null,
+      },
+    ]
+    const plan = planSync(rows, existing)
+    expect(plan.toUpdate).toHaveLength(1)
+    expect(plan.toUpdate[0].changes).toMatchObject({
+      insect_value: 'high',
+      bird_value: 'low',
+      bloom_start_month: 5,
+      bloom_end_month: 9,
+      pollinator_friendly: true,
+    })
+    // common_name is unchanged, so it is NOT in the update set.
+    expect(plan.toUpdate[0].changes).not.toHaveProperty('common_name')
+  })
+
+  it('never puts ai_origin_fields (survival provenance) in the sync set', () => {
+    expect(SYNCABLE_FIELDS).not.toContain('ai_origin_fields')
+    expect(SYNCABLE_FIELDS).toContain('eco_ai_origin_fields')
+  })
+
+  it('treats eco_ai_origin_fields as equal regardless of order (idempotency)', () => {
+    const rows = [staged({ latin_name: 'Already synced', common_name: 'Gleicher Name' })]
+    const existing = [
+      { latin_name: 'Already synced', common_name: 'Gleicher Name', source: IMPORT_SOURCE, ...ecoInSync },
+    ]
+    const plan = planSync(rows, existing)
+    expect(plan.toUpdate).toEqual([])
+    expect(plan.skippedNoChange).toEqual(['Already synced'])
   })
 
   it('skips unapproved rows', () => {
@@ -214,6 +375,14 @@ describe('planSync', () => {
     const plan = planSync(rows, existing)
     expect(plan.toUpdate).toEqual([])
     expect(plan.skippedUnapproved).toEqual(['Not approved'])
+  })
+
+  it('skips a review-required row — an unverified low-confidence trait never reaches a live row', () => {
+    const rows = [staged({ latin_name: 'Unverified', common_name: 'Neuer Name', review_required: true })]
+    const existing = [{ latin_name: 'Unverified', common_name: 'Alter Name', source: IMPORT_SOURCE }]
+    const plan = planSync(rows, existing)
+    expect(plan.toUpdate).toEqual([])
+    expect(plan.skippedReview).toEqual(['Unverified'])
   })
 
   it('skips rows not yet live', () => {
@@ -230,12 +399,44 @@ describe('planSync', () => {
     expect(plan.toUpdate).toEqual([])
     expect(plan.skippedNotEtlOwned).toEqual(['Hand seeded'])
   })
+})
 
-  it('skips a row whose syncable fields already match (idempotency)', () => {
-    const rows = [staged({ latin_name: 'Already synced', common_name: 'Gleicher Name' })]
-    const existing = [{ latin_name: 'Already synced', common_name: 'Gleicher Name', source: IMPORT_SOURCE }]
-    const plan = planSync(rows, existing)
-    expect(plan.toUpdate).toEqual([])
-    expect(plan.skippedNoChange).toEqual(['Already synced'])
+describe('ecologicalCoverageReport', () => {
+  it('counts a value as verified only when set AND not in eco_ai_origin_fields', () => {
+    const rows = [
+      // insect verified (set, not AI-inferred), bird still AI-inferred, no bloom, pollinator verified.
+      {
+        insect_value: 'high',
+        bird_value: 'low',
+        bloom_start_month: null,
+        bloom_end_month: null,
+        pollinator_friendly: true,
+        eco_ai_origin_fields: ['bird_value'],
+      },
+      // fully unassessed row.
+      {
+        insect_value: null,
+        bird_value: null,
+        bloom_start_month: null,
+        bloom_end_month: null,
+        pollinator_friendly: null,
+        eco_ai_origin_fields: null,
+      },
+    ]
+    const { total, counts } = ecologicalCoverageReport(rows)
+    expect(total).toBe(2)
+    expect(counts.insect_value).toMatchObject({ verified: 1, aiInferred: 0, notAssessed: 1 })
+    expect(counts.bird_value).toMatchObject({ verified: 0, aiInferred: 1, notAssessed: 1 })
+    expect(counts.pollinator_friendly).toMatchObject({ verified: 1, notAssessed: 1 })
+    expect(counts.bloom_period).toMatchObject({ verified: 0, notAssessed: 2 })
+  })
+
+  it('counts bloom as assessed only when BOTH months are set', () => {
+    const rows = [
+      { bloom_start_month: 11, bloom_end_month: 2, eco_ai_origin_fields: [] }, // wrap, verified
+      { bloom_start_month: 5, bloom_end_month: null, eco_ai_origin_fields: [] }, // half-set → not assessed
+    ]
+    const { counts } = ecologicalCoverageReport(rows)
+    expect(counts.bloom_period).toMatchObject({ verified: 1, notAssessed: 1 })
   })
 })

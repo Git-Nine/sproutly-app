@@ -16,7 +16,21 @@ const VALID = {
   maintenance_level: 'low',
   plant_type: 'perennial',
   care_notes: 'A reliable border perennial.',
-  confidence: { sun_tolerance: 'high', soil_compatibility: 'high', moisture: 'medium', min_hardiness_zone: 'low' },
+  insect_value: 'high',
+  bird_value: 'low',
+  bloom_start_month: 6,
+  bloom_end_month: 9,
+  pollinator_friendly: true,
+  confidence: {
+    sun_tolerance: 'high',
+    soil_compatibility: 'high',
+    moisture: 'medium',
+    min_hardiness_zone: 'low',
+    insect_value: 'high',
+    bird_value: 'medium',
+    bloom_period: 'high',
+    pollinator_friendly: 'high',
+  },
 }
 
 /** Fake Anthropic client returning a canned message. */
@@ -35,6 +49,34 @@ describe('inferTraits', () => {
     const traits = await inferTraits(candidate, { client })
     expect(traits.moisture).toBe('moist')
     expect(traits.confidence.min_hardiness_zone).toBe('low')
+  })
+
+  it('returns the ecological traits + their confidence', async () => {
+    const client = fakeClient(jsonResponse(VALID))
+    const traits = await inferTraits(candidate, { client })
+    expect(traits.insect_value).toBe('high')
+    expect(traits.pollinator_friendly).toBe(true)
+    expect(traits.bloom_start_month).toBe(6)
+    expect(traits.confidence.bloom_period).toBe('high')
+  })
+
+  it("accepts 'none' wildlife value and a null bloom pair (non-flowering)", async () => {
+    const client = fakeClient(
+      jsonResponse({ ...VALID, insect_value: 'none', bird_value: 'none', bloom_start_month: null, bloom_end_month: null }),
+    )
+    const traits = await inferTraits(candidate, { client })
+    expect(traits.insect_value).toBe('none')
+    expect(traits.bloom_start_month).toBeNull()
+  })
+
+  it('rejects an out-of-vocabulary wildlife band', async () => {
+    const client = fakeClient(jsonResponse({ ...VALID, insect_value: 'enormous' }))
+    await expect(inferTraits(candidate, { client })).rejects.toThrow(/vocabulary|range/i)
+  })
+
+  it('rejects a half-set bloom pair (both or neither)', async () => {
+    const client = fakeClient(jsonResponse({ ...VALID, bloom_end_month: null }))
+    await expect(inferTraits(candidate, { client })).rejects.toThrow()
   })
 
   it('throws RefusalError on a safety refusal', async () => {
@@ -86,5 +128,17 @@ describe('trait schemas', () => {
       'low',
     ])
     expect(traitsJsonSchema.additionalProperties).toBe(false)
+  })
+
+  it('the json_schema locks the ecological vocabulary + a nullable bloom pair', () => {
+    expect(traitsJsonSchema.properties.insect_value.enum).toEqual(['none', 'low', 'medium', 'high'])
+    expect(traitsJsonSchema.properties.bird_value.enum).toEqual(['none', 'low', 'medium', 'high'])
+    expect(traitsJsonSchema.properties.bloom_start_month.type).toEqual(['integer', 'null'])
+    expect(traitsJsonSchema.properties.pollinator_friendly.type).toBe('boolean')
+    expect(traitsJsonSchema.properties.confidence.properties.bloom_period.enum).toEqual([
+      'high',
+      'medium',
+      'low',
+    ])
   })
 })
