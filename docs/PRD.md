@@ -33,7 +33,7 @@ Millions replace gardens with gravel and sealed surfaces believing it is the low
 | P1 | PROJ-11 Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Deployed |
 | P1 | PROJ-12 AI Plan Curation & Rationale | Deployed |
 | P1 | PROJ-13 Survival Confidence Band | Planned |
-| P1 | PROJ-14 Ecological Trait Enrichment (ETL extension) | Planned |
+| P1 | PROJ-14 Ecological Trait Enrichment (ETL extension) | Deployed |
 | P1 | PROJ-15 Biodiversity Indicator | Planned |
 
 See `features/INDEX.md` for dependencies and build order.

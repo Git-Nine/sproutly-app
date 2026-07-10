@@ -1,8 +1,8 @@
 # PROJ-14: Ecological Trait Enrichment (ETL extension)
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-07-10
-**Last Updated:** 2026-07-10 (QA passed — /qa)
+**Last Updated:** 2026-07-10 (deployed to production — /deploy)
 
 ## Dependencies
 - Requires: PROJ-5 (Plant Database & Admin Interface) — the `plants` table these traits are added to
@@ -395,7 +395,30 @@ deploy-gated (needs the migration applied) rather than genuinely untestable, so 
 belongs after deploy.
 
 ## Deployment
-_To be added by /deploy_
 
-## Deployment
-_To be added by /deploy_
+**Deployed:** 2026-07-10 (/deploy) · **Status: Deployed** · **Tag:** `v1.14.0-PROJ-14`
+
+- **Production URL:** https://sproutly-green.de
+- **Deployment:** `dpl_CXGxpDEBij1wUkNnTqtbAJgcGwJv` (commit `bd7e6a6`), state **READY** in ~40s, region `iad1`, via GitHub main-push auto-deploy.
+- **Rollback candidate:** `dpl_9xpehh6EPWgD9ep432Uxj3TqRDWi` (PROJ-13 deploy) — promote via Vercel dashboard if needed.
+
+### What shipped
+The three local PROJ-14 commits (frontend side-door, backend pipeline, QA results) pushed to `main` together. No new env vars, no n8n change.
+
+### Deploy gate — resolved
+The migration `20260710110000_proj14_plants_ecological_traits.sql` was **applied to production first** (Supabase dashboard SQL Editor, confirmed by the user), **before** the push — required because the admin plant form now sends the five ecological columns on every save. Ordering honoured, so admin saves never hit a missing-column error window.
+
+### Post-deploy checks
+- Deployment READY and serving the production alias (`sproutly-green.de`).
+- Zero Vercel runtime errors post-deploy.
+- Login route renders correctly; `select('*')` reads (admin plant list/edit, plan view) unaffected.
+- Additive/nullable schema + engine untouched → plan generation byte-identical to before (per QA regression: unit 440/440, E2E 92/92).
+
+### Residual — curator/backfill session (not blocking; unblocked by this deploy)
+The live enrichment pipeline is a human-in-the-loop step, intentionally **not** run during deploy (it spends Anthropic API budget and needs manual naturadb.de verification). Run when ready:
+1. `npm run import:plants` → curator review against naturadb.de (**wildlife values first**, per the decision log) → `npm run import:plants:commit` → `npm run import:plants:sync` (the backfill onto the ~160 `open_data_etl` rows).
+2. Record the naturadb.de field → app-band mapping (Open Question) and the reported ecological-trait coverage numbers.
+3. Spot-check a sample of **high-confidence** eco traits against naturadb.de (the "high-confidence-but-wrong" native-flag failure mode — a curator-process check).
+4. Hand-seeded rows (*Achillea millefolium*, *Betula pendula*) get their traits via the admin-form side door only.
+
+This is the prerequisite for PROJ-15 (Biodiversity Indicator) to ship against verified data.
