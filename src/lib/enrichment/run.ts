@@ -100,9 +100,19 @@ async function enrich(
 
   const soilType = soilResult.status === 'fulfilled' ? soilResult.value : null
   const climate = climateResult.status === 'fulfilled' ? climateResult.value : null
+  // Zone only from a genuinely sampled min temp — an unsampled grid is null, so
+  // a partial DWD failure can no longer fabricate the mildest zone as "confirmed"
+  // and silently disable the PROJ-6 winter hard filter (PROJ-13 QA BUG-2).
   const hardinessZone = climate?.minTemp != null ? deriveHardinessZone(climate.minTemp) : null
 
-  const allSucceeded = soilType !== null && climate !== null
+  // "Complete" requires every climate field actually sampled — a partly failed
+  // DWD run is honest 'partial', so the enrichment-retry path stays reachable.
+  const climateComplete =
+    climate !== null &&
+    climate.rainfallMm !== null &&
+    climate.minTemp !== null &&
+    climate.frostDays !== null
+  const allSucceeded = soilType !== null && climateComplete
   const allFailed = soilType === null && climate === null
 
   // Stale-result guard: discard if a newer enrichment request has started.
@@ -112,9 +122,12 @@ async function enrich(
     status: allSucceeded ? 'complete' : allFailed ? 'failed' : 'partial',
     soil_type: soilType ?? undefined,
     soil_status: soilType !== null ? 'success' : 'unavailable',
-    rainfall_mm: climate?.rainfallMm,
-    annual_min_temp: climate?.minTemp,
-    frost_days: climate?.frostDays,
+    // Unsampled fields stay unset (NULL in the row) — consumers null-check per
+    // field, and PROJ-13's siteRainfall passes null through so the band's
+    // moisture factor is skipped instead of judged against a fake 0 mm (BUG-1).
+    rainfall_mm: climate?.rainfallMm ?? undefined,
+    annual_min_temp: climate?.minTemp ?? undefined,
+    frost_days: climate?.frostDays ?? undefined,
     climate_status: climate !== null ? 'success' : 'unavailable',
     climate_period: CLIMATE_PERIOD,
     hardiness_zone: hardinessZone ?? undefined,

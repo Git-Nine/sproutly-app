@@ -336,6 +336,7 @@ The band is a pure computation rendered by thin components, so the deepest cover
 - **Repro:** precipitation grid fetch fails/samples NODATA while min-temp or frost grid succeeds → `scan_enrichment.rainfall_mm = 0`, `climate_status = 'success'` → PROJ-13 snapshots 0 as real, buckets it "low", and every `moisture: 'wet'` plant is forced to "Worth checking" ("Likes more moisture than your area's rainfall…") from a value that was never measured — violating the feature's "never guess" principle.
 - **Expected:** unsampled grid → NULL rainfall stored (or per-field status) → PROJ-13 skips the moisture factor, exactly as designed for missing data.
 - **Priority:** Fix before deployment (small backend fix; shares its root with BUG-2)
+- **✅ FIXED 2026-07-10 (/backend):** unsampled grid fields now stay null (never 0); `siteRainfall` passes null through and the band skips the moisture factor. Regression test in `enrichment/run.test.ts`. See PROJ-4 spec → "Post-Deploy Fix — partial DWD grid failure".
 
 #### BUG-2: Same root fabricates `minTemp = 0` → hardiness zone '10' marked `zone_status = 'success'` — silently disables the PROJ-6 winter hard filter
 - **Severity:** High — **pre-existing since PROJ-4, in production today; discovered during this QA, not caused by PROJ-13**
@@ -343,6 +344,7 @@ The band is a pure computation rendered by thin components, so the deepest cover
 - **Repro:** min-temp grid fetch fails while precipitation/frost succeeds → zone '10' (mildest) stored as *confirmed* → every plant passes the zone hard filter and the UI claims "Zone 10" as fact — winter survival filtering is off while claiming certainty.
 - **Expected:** unsampled min temp → NULL zone + `zone_status: 'unavailable'` → PROJ-6's existing zone-unconfirmed path (filter suppressed *and honestly labelled*, PROJ-13 counts it as a gap).
 - **Priority:** Fix before next deployment (same fix location as BUG-1: per-field nulls in `fetchDwdClimate` + per-field status in `run.ts`)
+- **✅ FIXED 2026-07-10 (/backend):** zone derived only from a genuinely sampled min temp; unsampled → `zone_status: 'unavailable'` (the honest zone-unconfirmed path) and overall status `'partial'` so retry stays reachable. Regression test in `enrichment/run.test.ts`. See PROJ-4 spec → "Post-Deploy Fix — partial DWD grid failure".
 
 #### Observations (no action required for approval)
 - **OBS-1 (Low):** `scan_enrichment.rainfall_mm` is unconstrained while `plans.snapshot_rainfall_mm` has a 0–10000 check — a hypothetical out-of-range enrichment value would make plan *creation* fail wholesale. Fixing BUG-1 (null-not-zero) plus the existing DWD value scale makes this practically unreachable; a defensive clamp in the persist path would close it fully.
@@ -361,6 +363,7 @@ Authenticated in-browser flows (the plan screen with a real session) have never 
 - **Bugs:** 1 High (pre-existing PROJ-4, discovered here), 1 Medium (PROJ-4 root, PROJ-13 surface), 1 Low observation
 - **Security:** no findings; new columns verified under RLS + constraints against the live schema
 - **Production-ready: YES for PROJ-13 itself** (no Critical/High bugs *in this feature*). **Strong recommendation:** fix BUG-1 + BUG-2 (one small `/backend` change in enrichment) before or with the PROJ-13 deploy, since BUG-1 can make the band lie and BUG-2 already affects production plan generation.
+- **Update 2026-07-10: BUG-1 and BUG-2 are both fixed** (`/backend`, same session — per-field nulls in `fetchDwdClimate`, honest partial status in `runEnrichment`, +2 regression tests, suite 401/401). No open bugs remain; PROJ-13 is clear to `/deploy`.
 
 ## Deployment
 _To be added by /deploy_

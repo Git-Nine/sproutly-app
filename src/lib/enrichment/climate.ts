@@ -26,10 +26,14 @@ const DWD_SCALE = { precipitation: 1, minTemp: 10, frostDays: 1 } as const
 
 export const CLIMATE_PERIOD = '1991–2020'
 
+/** Per-field null = that grid wasn't sampled (fetch failed, out of bounds, or
+ *  NODATA). Never a fabricated value: a missing measurement stored as 0 once
+ *  produced a fake "0 mm/yr" rainfall and a fake zone-10 winter (PROJ-13 QA
+ *  BUG-1/BUG-2) — downstream must skip null fields, not read them as data. */
 export type DwdClimate = {
-  rainfallMm: number
-  minTemp: number
-  frostDays: number
+  rainfallMm: number | null
+  minTemp: number | null
+  frostDays: number | null
 }
 
 /** Sample the three DWD grids at a point. Null when no grid yields a value. */
@@ -47,9 +51,9 @@ export async function fetchDwdClimate(lat: number, lng: number): Promise<DwdClim
   if (rawPrecip == null && rawMinTemp == null && rawFrost == null) return null
 
   return {
-    rainfallMm: rawPrecip  != null ? Math.round(rawPrecip / DWD_SCALE.precipitation) : 0,
-    minTemp:    rawMinTemp != null ? rawMinTemp / DWD_SCALE.minTemp : 0,
-    frostDays:  rawFrost   != null ? Math.round(rawFrost / DWD_SCALE.frostDays) : 0,
+    rainfallMm: rawPrecip  != null ? Math.round(rawPrecip / DWD_SCALE.precipitation) : null,
+    minTemp:    rawMinTemp != null ? rawMinTemp / DWD_SCALE.minTemp : null,
+    frostDays:  rawFrost   != null ? Math.round(rawFrost / DWD_SCALE.frostDays) : null,
   }
 }
 

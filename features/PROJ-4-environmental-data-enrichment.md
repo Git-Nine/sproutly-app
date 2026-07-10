@@ -428,3 +428,12 @@ Fix: `DWD_SCALE.precipitation` changed from `10` to `1`. Temperature (°C×10) a
 - [x] `npm run lint` clean (added `.claude/`/`.codex/`/`.agents/` to ESLint ignore)
 - [x] Pushed to `main` → Vercel auto-deploy triggered
 - [x] Verified enrichment end-to-end in production — all three sources (BGR soil, DWD climate, DWD frost days) returning real values for postcode 09123 ✅
+
+## Post-Deploy Fix — partial DWD grid failure fabricated climate values (2026-07-10)
+
+Found by PROJ-13's QA (spec → QA Test Results, BUG-1/BUG-2). `fetchDwdClimate` sampled the three DWD grids independently but fell back to **`0` for any unsampled field** as long as at least one grid succeeded, and `runEnrichment` then marked the whole climate read `success`/`complete`:
+
+- **BUG-2 (High):** an unsampled min-temp grid became `minTemp = 0 °C` → `deriveHardinessZone(0)` = zone **'10'** (Germany's mildest) stored with `zone_status = 'success'` — the PROJ-6 winter hard filter passed every plant while the UI claimed the zone was confirmed.
+- **BUG-1 (Medium):** an unsampled precipitation grid became `rainfall_mm = 0` under `climate_status = 'success'` — PROJ-13 snapshots that as real, buckets 0 mm as "low", and forces false "Worth checking" moisture conflicts on wet-moisture plants ("never guess" violated).
+
+**Fix (`src/lib/enrichment/climate.ts` + `run.ts`):** `DwdClimate` fields are now `number | null` — an unsampled grid stays null, never 0. `runEnrichment` derives the zone only from a genuinely sampled min temp (unsampled → no zone, `zone_status: 'unavailable'` → PROJ-6's existing honest zone-unconfirmed path), leaves unsampled climate columns NULL (consumers already null-check per field; PROJ-13's `siteRainfall` passes null through and skips the moisture factor), and reports `status: 'partial'` unless **all three** climate fields were sampled — so the enrichment-retry path stays reachable after a partial DWD failure. Two regression tests added (`run.test.ts`: no fabricated 0 rainfall, no fabricated zone 10). Suite 401/401 green, lint + build clean. No schema change, no data backfill (existing rows with a fabricated value self-heal on the next enrichment run of that scan).

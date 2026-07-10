@@ -166,6 +166,56 @@ describe('runEnrichment', () => {
     expect(write.status).toBe('failed')
   })
 
+  // PROJ-13 QA BUG-1: an unsampled precipitation grid must store NO rainfall,
+  // not a fabricated 0 mm/yr that the confidence band would bucket as "low"
+  // and turn into false moisture-conflict warnings.
+  it('stores no rainfall (not 0) when only the precipitation grid fails', async () => {
+    mockStillCurrent()
+    mockFetchSoilType.mockResolvedValue('loam')
+    const fakeGrid = { ncols: 1, nrows: 1, xllcorner: 0, yllcorner: 0, cellsize: 1, nodata: -999, values: new Float32Array([0]) }
+    mockFetchGrid.mockResolvedValue(fakeGrid)
+    mockGridValueAt
+      .mockReturnValueOnce(null)  // precipitation: NODATA / unsampled
+      .mockReturnValueOnce(-85)   // minTemp: -8.5 °C
+      .mockReturnValueOnce(45)    // frostDays
+
+    await runEnrichment({ scan: SCAN_DE, userId: USER_ID, requestedAt: REQUESTED_AT })
+
+    const write = adminUpsert.mock.calls[0][0] as Record<string, unknown>
+    expect(write.rainfall_mm).toBeUndefined() // column stays NULL — never 0
+    expect(write.status).toBe('partial')      // honest: retry stays reachable
+    expect(write).toMatchObject({
+      climate_status: 'success',
+      hardiness_zone: '9', // the sampled fields still work
+      zone_status: 'success',
+    })
+  })
+
+  // PROJ-13 QA BUG-2: an unsampled min-temp grid must yield NO zone — the old
+  // 0 °C fallback derived zone '10' (mildest) marked as CONFIRMED, silently
+  // disabling the PROJ-6 winter hard filter.
+  it('stores no hardiness zone when the min-temp grid fails (never a fabricated zone 10)', async () => {
+    mockStillCurrent()
+    mockFetchSoilType.mockResolvedValue('loam')
+    const fakeGrid = { ncols: 1, nrows: 1, xllcorner: 0, yllcorner: 0, cellsize: 1, nodata: -999, values: new Float32Array([0]) }
+    mockFetchGrid.mockResolvedValue(fakeGrid)
+    mockGridValueAt
+      .mockReturnValueOnce(640)   // precipitation
+      .mockReturnValueOnce(null)  // minTemp: NODATA / unsampled
+      .mockReturnValueOnce(45)    // frostDays
+
+    await runEnrichment({ scan: SCAN_DE, userId: USER_ID, requestedAt: REQUESTED_AT })
+
+    const write = adminUpsert.mock.calls[0][0] as Record<string, unknown>
+    expect(write.hardiness_zone).toBeUndefined()
+    expect(write.annual_min_temp).toBeUndefined()
+    expect(write.status).toBe('partial')
+    expect(write).toMatchObject({
+      rainfall_mm: 640,
+      zone_status: 'unavailable', // zone honestly unconfirmed, filter suppressed + labelled
+    })
+  })
+
   it('discards results when a newer enrichment has started (stale guard)', async () => {
     // Return a different timestamp → stale; should not call upsert.
     adminMaybeSingle.mockResolvedValue({ data: { requested_at: 'a-different-timestamp' } })
