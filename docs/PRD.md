@@ -33,6 +33,8 @@ Millions replace gardens with gravel and sealed surfaces believing it is the low
 | P1 | PROJ-11 Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Deployed |
 | P1 | PROJ-12 AI Plan Curation & Rationale | Deployed |
 | P1 | PROJ-13 Survival Confidence Band | Planned |
+| P1 | PROJ-14 Ecological Trait Enrichment (ETL extension) | Planned |
+| P1 | PROJ-15 Biodiversity Indicator | Planned |
 
 See `features/INDEX.md` for dependencies and build order.
 
@@ -67,7 +69,7 @@ Deferred to keep v1 focused on validating the core journey:
 - Food growing / vegetable planning — out of product scope.
 - Professional / commercial landscaping — out of product scope.
 - Plant diagnostics / disease detection (v2).
-- Biodiversity scoring — unvalidated, research first.
+- Biodiversity scoring as a number/percentage — unvalidated, no defensible baseline. The honest, concrete + banded version is in scope as PROJ-15 Biodiversity Indicator, backed by verified ecological data from PROJ-14 (2026-07-10).
 
 ## AI Swap-In Points (designed now, built later)
 The v1 architecture separates concerns so AI can be introduced without restructuring the database or frontend:
