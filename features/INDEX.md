@@ -27,6 +27,7 @@
 | PROJ-10 | In-App Notifications | Planned | P1 | PROJ-5, PROJ-6 | [PROJ-10](PROJ-10-in-app-notifications.md) | 2026-06-22 |
 | PROJ-11 | Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Deployed | P1 | PROJ-1, PROJ-5 | [PROJ-11](PROJ-11-plant-catalogue-etl-floraweb.md) | 2026-07-06 |
 | PROJ-12 | AI Plan Curation & Rationale | Deployed | P1 | PROJ-6, PROJ-7 (soft: PROJ-11) | [PROJ-12](PROJ-12-ai-plan-curation-and-rationale.md) | 2026-07-07 |
+| PROJ-13 | Survival Confidence Band | Planned | P1 | PROJ-6, PROJ-7 (soft: PROJ-4, PROJ-11) | [PROJ-13](PROJ-13-survival-confidence-band.md) | 2026-07-10 |
 
 <!-- Add features above this line -->
 
@@ -66,4 +67,4 @@ Notes:
 
 - **PROJ-3 post-deploy enhancement (2026-07-06):** made the postcode **auto-fill in the common cases** (the recurring "postcode still not auto-filled" feedback — photo-GPS auto-fill only fires when the photo actually carries GPS EXIF, which most mobile uploads/screenshots/messenger-shared photos don't). Two additions, frontend-only, **no DB change / no migration**: (1) **Remember the last postcode** — `/scans/new` now reads the user's most recent scan's postcode (RLS-scoped) and passes it to `ScanForm` as `defaultPostcode`, pre-filling with a "From your last space — edit if needed" hint (kept "untouched" so a geotagged photo can still correct it). (2) **Auto-geolocate on the review step** — a new scan reaching review with no postcode yet quietly attempts `navigator.geolocation` once (no tap); added a `silent` option to `use-locate-postcode.ts` so this un-requested attempt degrades with no error toast on denial, while the explicit "Use my location" button still toasts. Precedence: remembered → photo GPS → auto-geolocate → button/manual. Co-located tests updated + new `use-locate-postcode.test.ts`; full suite 251/251 green. See PROJ-3 spec → "Post-Deploy Enhancement — Postcode auto-fill (remember last + auto-geolocate)".
 
-## Next Available ID: PROJ-13
+## Next Available ID: PROJ-14

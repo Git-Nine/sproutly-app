@@ -30,8 +30,9 @@ Millions replace gardens with gravel and sealed surfaces believing it is the low
 | P0 (MVP) | PROJ-8 Shopping List & Deep Links | Deployed |
 | P1 | PROJ-9 Progress Photo Log | Roadmap |
 | P1 | PROJ-10 In-App Notifications | Planned |
-| P1 | PROJ-11 Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Planned |
-| P1 | PROJ-12 AI Plan Curation & Rationale | Planned |
+| P1 | PROJ-11 Plant Catalogue ETL (FloraWeb/BfN + AI trait mapping) | Deployed |
+| P1 | PROJ-12 AI Plan Curation & Rationale | Deployed |
+| P1 | PROJ-13 Survival Confidence Band | Planned |
 
 See `features/INDEX.md` for dependencies and build order.
 
@@ -60,7 +61,7 @@ See `features/INDEX.md` for dependencies and build order.
 Deferred to keep v1 focused on validating the core journey:
 - AI / ML inference (vision, LLM) — clean swap-in points designed now, built later.
 - Garden centre API integration — deep links cover v1.
-- Survival Confidence Score — needs garden centre + soil data combined (v2).
+- Survival Confidence Score as a calibrated percentage — needs outcome data (PROJ-9) + garden centre data (v2). The honest, banded version is in scope as PROJ-13 Survival Confidence Band (2026-07-10).
 - Push notifications / seasonal nudges (v2).
 - Social / community features (v2).
 - Food growing / vegetable planning — out of product scope.
