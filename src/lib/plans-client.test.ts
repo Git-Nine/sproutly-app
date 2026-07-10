@@ -117,6 +117,9 @@ const ENRICHMENT = {
   soil_status: 'success',
   hardiness_zone: '7',
   zone_status: 'success',
+  rainfall_mm: 820,
+  climate_status: 'success',
+  location_basis: 'gps',
 } as ScanEnrichment
 
 let plantSeq = 0
@@ -254,6 +257,28 @@ describe('persistGeneratedPlan — curation integration', () => {
     for (const line of inserted.plan_plants as Array<Record<string, unknown>>) {
       expect(line.rationale).toBeNull()
     }
+  })
+
+  it('persists the PROJ-13 confidence snapshot fields (rainfall + location basis)', async () => {
+    const { client, inserted } = mockGenClient([plant()])
+    mockCurateFetch({ curated: false })
+
+    await persistGeneratedPlan(client, { scan: SCAN, enrichment: ENRICHMENT, userId: USER_ID })
+
+    const [planRow] = inserted.plans as Array<Record<string, unknown>>
+    expect(planRow.snapshot_rainfall_mm).toBe(820)
+    expect(planRow.snapshot_location_basis).toBe('gps')
+  })
+
+  it('persists NULL confidence snapshot fields when enrichment is missing (factors skipped)', async () => {
+    const { client, inserted } = mockGenClient([plant()])
+    mockCurateFetch({ curated: false })
+
+    await persistGeneratedPlan(client, { scan: SCAN, enrichment: null, userId: USER_ID })
+
+    const [planRow] = inserted.plans as Array<Record<string, unknown>>
+    expect(planRow.snapshot_rainfall_mm).toBeNull()
+    expect(planRow.snapshot_location_basis).toBeNull()
   })
 
   it('never calls the curation route when the rule plan is empty (nothing to curate)', async () => {

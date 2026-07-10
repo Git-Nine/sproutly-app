@@ -7,6 +7,8 @@ import {
   layerEligible,
   matchingSurvivors,
   richnessForArea,
+  siteLocationBasis,
+  siteRainfall,
   siteSoil,
   siteZone,
   type GeneratePlanInput,
@@ -159,6 +161,8 @@ export function applyCuration(
     soil,
     zone,
     maintenance: maintenancePreference,
+    rainfall_mm: siteRainfall(enrichment),
+    location_basis: siteLocationBasis(enrichment),
   }
 
   // Layer order like generation (tallest first); AI's order kept within a layer.

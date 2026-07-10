@@ -1,6 +1,7 @@
 import { LAYER_DISPLAY_ORDER } from '@/lib/plants'
 import type { Plant, PlantType, MaintenanceLevel, Soil } from '@/lib/plants'
 import type { Scan, ScanEnrichment, SunExposure, Surface, SpaceType } from '@/lib/scans'
+import { BAND_RANK, plantConfidence, type ConfidenceSite, type LocationBasis } from '@/lib/plan-confidence'
 
 /**
  * PROJ-6 rule engine — a PURE, deterministic calculation.
@@ -10,8 +11,11 @@ import type { Scan, ScanEnrichment, SunExposure, Surface, SpaceType } from '@/li
  * reuses this exact module for its interactive editing. No I/O, no Date/random.
  *
  * Pipeline: hard filters (sun, winter zone, physical fit) → eligible layers by
- * area (~60/30/10) → area-scaled richness target → native-first ranking within
- * each layer → quantities that fill each layer's area at mature spread.
+ * area (~60/30/10) → area-scaled richness target → band-led ranking within each
+ * layer (PROJ-13 confidence band first, then the original native → soil →
+ * maintenance → compact → name order as tiebreak) → quantities that fill each
+ * layer's area at mature spread. The band is RANKING-ONLY: the hard filter set
+ * is untouched, so no plant is excluded (or admitted) by PROJ-13.
  */
 
 // ---- Tunable constants (see spec "Engine constants") ----
@@ -56,6 +60,10 @@ export type PlanSnapshot = {
   soil: Soil | null
   zone: number | null
   maintenance: MaintenanceLevel | null
+  /** PROJ-13: raw annual rainfall (mm) at generation time; null = climate unavailable. */
+  rainfall_mm: number | null
+  /** PROJ-13: how the site location was derived; null = unknown (e.g. no enrichment). */
+  location_basis: LocationBasis | null
 }
 
 export type GeneratedPlan = {
@@ -73,7 +81,15 @@ export type GeneratePlanInput = {
   scan: Pick<Scan, 'sun_exposure' | 'area_sqm' | 'surface' | 'space_type'>
   enrichment: Pick<
     ScanEnrichment,
-    'soil_type' | 'soil_status' | 'hardiness_zone' | 'zone_status'
+    | 'soil_type'
+    | 'soil_status'
+    | 'hardiness_zone'
+    | 'zone_status'
+    // PROJ-13 band inputs — nullable/optional-friendly, so callers that predate
+    // them (or tests with partial fixtures) keep working: absent = skipped factor.
+    | 'rainfall_mm'
+    | 'climate_status'
+    | 'location_basis'
   > | null
   catalogue: Plant[]
   maintenancePreference: MaintenanceLevel | null
@@ -156,18 +172,55 @@ export function richnessForArea(areaSqm: number): number {
   return Math.min(RICHNESS_CEILING, Math.max(RICHNESS_FLOOR, raw))
 }
 
+// Each site-fact helper picks only the fields it reads, so callers holding a
+// narrower enrichment slice (e.g. isPlanStale) keep compiling as new band
+// inputs are added to GeneratePlanInput.
+
 /** The site's soil bucket from enrichment, or null when not successfully derived. */
-export function siteSoil(enrichment: GeneratePlanInput['enrichment']): Soil | null {
+export function siteSoil(
+  enrichment: Pick<ScanEnrichment, 'soil_type' | 'soil_status'> | null,
+): Soil | null {
   return enrichment && enrichment.soil_status === 'success' ? enrichment.soil_type : null
 }
 
 /** The site's whole-number hardiness zone from enrichment, or null when unconfirmed. */
-export function siteZone(enrichment: GeneratePlanInput['enrichment']): number | null {
+export function siteZone(
+  enrichment: Pick<ScanEnrichment, 'hardiness_zone' | 'zone_status'> | null,
+): number | null {
   const parsed =
     enrichment && enrichment.zone_status === 'success' && enrichment.hardiness_zone != null
       ? Number.parseInt(enrichment.hardiness_zone, 10)
       : NaN
   return Number.isNaN(parsed) ? null : parsed
+}
+
+/** The site's raw annual rainfall (mm) from enrichment, or null when climate wasn't derived. */
+export function siteRainfall(
+  enrichment: Pick<ScanEnrichment, 'rainfall_mm' | 'climate_status'> | null,
+): number | null {
+  return enrichment && enrichment.climate_status === 'success' ? (enrichment.rainfall_mm ?? null) : null
+}
+
+/** How the site location was derived (GPS vs postcode centroid), or null when unknown. */
+export function siteLocationBasis(
+  enrichment: Pick<ScanEnrichment, 'location_basis'> | null,
+): LocationBasis | null {
+  return enrichment?.location_basis ?? null
+}
+
+/**
+ * PROJ-13: the confidence module's site input, derived from a plan snapshot.
+ * Kept next to the snapshot type so the two can't drift; the UI builds the same
+ * value from a persisted `plans` row via `confidenceSiteFromPlan` (plans.ts).
+ */
+export function confidenceSiteFromSnapshot(snapshot: PlanSnapshot): ConfidenceSite {
+  return {
+    soil: snapshot.soil,
+    zone: snapshot.zone,
+    rainfallMm: snapshot.rainfall_mm,
+    locationBasis: snapshot.location_basis,
+    maintenance: snapshot.maintenance,
+  }
 }
 
 /**
@@ -289,14 +342,22 @@ export function layerEligible(layer: PlantType, areaSqm: number): boolean {
   return areaSqm >= TREE_MIN_AREA_SQM // tree
 }
 
-/** Order a layer's survivors: native → soil-match → maintenance-match → compact (balcony) → name. */
+/**
+ * Order a layer's survivors: confidence band (PROJ-13) → native → soil-match →
+ * maintenance-match → compact (balcony) → name. The band is the FIRST key so the
+ * plan visibly practices what the displayed band preaches; everything after it
+ * is the original PROJ-6 order, now the tiebreak within a band.
+ */
 function rankLayer(
   plants: Plant[],
-  soil: Soil | null,
-  maintenance: MaintenanceLevel | null,
+  site: ConfidenceSite,
   spaceType: SpaceType,
 ): Plant[] {
+  const { soil, maintenance } = site
+  const band = new Map(plants.map((p) => [p.id, BAND_RANK[plantConfidence(p, site).band]]))
   return [...plants].sort((a, b) => {
+    const bandDiff = band.get(a.id)! - band.get(b.id)!
+    if (bandDiff !== 0) return bandDiff
     if (a.native !== b.native) return a.native ? -1 : 1
     if (soil) {
       const am = a.soil_compatibility.includes(soil) ? 0 : 1
@@ -383,7 +444,10 @@ export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
     soil,
     zone,
     maintenance: maintenancePreference,
+    rainfall_mm: siteRainfall(enrichment),
+    location_basis: siteLocationBasis(enrichment),
   }
+  const confidenceSite = confidenceSiteFromSnapshot(snapshot)
 
   // 1. Hard filters: sun, winter zone (when known), physical fit (shared helper).
   const survivors = matchingSurvivors({ scan, enrichment, catalogue })
@@ -405,7 +469,7 @@ export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
     if (!layerEligible(layer, area)) continue
     const members = survivors.filter((p) => p.plant_type === layer)
     if (members.length) {
-      byLayer.set(layer, rankLayer(members, soil, maintenancePreference, scan.space_type))
+      byLayer.set(layer, rankLayer(members, confidenceSite, scan.space_type))
     }
   }
   const presentLayers = LAYER_DISPLAY_ORDER.filter((l) => byLayer.has(l))

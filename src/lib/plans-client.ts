@@ -136,6 +136,9 @@ export async function persistGeneratedPlan(
     snapshot_soil: plan.snapshot.soil,
     snapshot_zone: plan.snapshot.zone,
     snapshot_maintenance: plan.snapshot.maintenance,
+    // PROJ-13: the two extra site facts the confidence band reads (nullable).
+    snapshot_rainfall_mm: plan.snapshot.rainfall_mm,
+    snapshot_location_basis: plan.snapshot.location_basis,
     zone_unconfirmed: plan.zoneUnconfirmed,
     extra_match_count: plan.extraMatchCount,
     rationale_intro: plan.rationaleIntro ?? null,

@@ -1,6 +1,7 @@
 import type { Plant, MaintenanceLevel, Soil } from '@/lib/plants'
 import type { Scan, ScanEnrichment, SunExposure, Surface, SpaceType } from '@/lib/scans'
 import { siteSoil, siteZone } from '@/lib/plan-engine'
+import type { ConfidenceSite, LocationBasis } from '@/lib/plan-confidence'
 
 /**
  * Plan contract for PROJ-6 (Rule-Based Plan Generation).
@@ -29,6 +30,12 @@ export type Plan = {
   snapshot_soil: Soil | null
   snapshot_zone: number | null
   snapshot_maintenance: MaintenanceLevel | null
+  /** PROJ-13: raw annual rainfall (mm) at generation time. NULL = climate
+   *  unavailable or pre-PROJ-13 plan — the moisture band factor is then skipped. */
+  snapshot_rainfall_mm: number | null
+  /** PROJ-13: how the site location was derived. NULL = unknown or pre-PROJ-13
+   *  plan — the location band factor is then skipped. */
+  snapshot_location_basis: LocationBasis | null
   // Plan-level flags / counts.
   zone_unconfirmed: boolean
   extra_match_count: number
@@ -86,9 +93,39 @@ export function mergeDuplicateLines(lines: PlanPlantWithPlant[]): PlanPlantWithP
 }
 
 /**
+ * PROJ-13: the confidence module's site input, read from a persisted plan row's
+ * SNAPSHOT (never the live scan — consistent with how PROJ-7 keeps stale plans
+ * honest). Nulls mean "not captured" and make the module skip those factors, so
+ * pre-PROJ-13 plans get honest bands without any backfill. Pure.
+ */
+export function confidenceSiteFromPlan(
+  plan: Pick<
+    Plan,
+    | 'snapshot_soil'
+    | 'snapshot_zone'
+    | 'snapshot_rainfall_mm'
+    | 'snapshot_location_basis'
+    | 'snapshot_maintenance'
+  >,
+): ConfidenceSite {
+  return {
+    soil: plan.snapshot_soil,
+    zone: plan.snapshot_zone,
+    rainfallMm: plan.snapshot_rainfall_mm,
+    locationBasis: plan.snapshot_location_basis,
+    maintenance: plan.snapshot_maintenance,
+  }
+}
+
+/**
  * PROJ-7: a plan is stale when the scan's MATCHING inputs no longer equal the
  * snapshot the plan was generated from. Cosmetic scan fields (name, photo) are
  * ignored. Pure.
+ *
+ * PROJ-13's snapshot additions (rainfall, location basis) are DELIBERATELY not
+ * staleness inputs: they feed banding/ranking only, never the survivor pool,
+ * and including them would flag every pre-PROJ-13 plan stale (null vs
+ * now-captured) the moment this feature ships.
  */
 export function isPlanStale(
   plan: Plan,

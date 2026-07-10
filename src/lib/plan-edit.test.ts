@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { computeQuantities, matchingSurvivors } from './plan-engine'
-import { mergeDuplicateLines, isPlanStale, type Plan, type PlanPlantWithPlant } from './plans'
+import {
+  mergeDuplicateLines,
+  isPlanStale,
+  confidenceSiteFromPlan,
+  type Plan,
+  type PlanPlantWithPlant,
+} from './plans'
 import type { Plant } from './plants'
 import type { Scan, ScanEnrichment } from './scans'
 
@@ -144,24 +150,27 @@ describe('mergeDuplicateLines', () => {
   })
 })
 
+const basePlan: Plan = {
+  id: 'plan1',
+  scan_id: 'scan1',
+  user_id: 'u1',
+  snapshot_sun: 'full',
+  snapshot_area_sqm: 30,
+  snapshot_surface: 'soil',
+  snapshot_space_type: 'back_garden',
+  snapshot_soil: 'loam',
+  snapshot_zone: 7,
+  snapshot_maintenance: 'low',
+  snapshot_rainfall_mm: 750,
+  snapshot_location_basis: 'gps',
+  zone_unconfirmed: false,
+  extra_match_count: 0,
+  rationale_intro: null,
+  created_at: '2026-01-01',
+  updated_at: null,
+}
+
 describe('isPlanStale', () => {
-  const basePlan: Plan = {
-    id: 'plan1',
-    scan_id: 'scan1',
-    user_id: 'u1',
-    snapshot_sun: 'full',
-    snapshot_area_sqm: 30,
-    snapshot_surface: 'soil',
-    snapshot_space_type: 'back_garden',
-    snapshot_soil: 'loam',
-    snapshot_zone: 7,
-    snapshot_maintenance: 'low',
-    zone_unconfirmed: false,
-    extra_match_count: 0,
-    rationale_intro: null,
-    created_at: '2026-01-01',
-    updated_at: null,
-  }
   const scan = {
     sun_exposure: 'full',
     area_sqm: 30,
@@ -192,5 +201,34 @@ describe('isPlanStale', () => {
 
   it('is stale when the maintenance preference changed', () => {
     expect(isPlanStale(basePlan, { scan, enrichment, maintenancePreference: 'high' })).toBe(true)
+  })
+
+  it('is NOT stale when only PROJ-13 band inputs differ (rainfall/location are ranking-only)', () => {
+    const e = {
+      ...enrichment,
+      rainfall_mm: 1500,
+      climate_status: 'success',
+      location_basis: 'postcode_centroid',
+    } as ScanEnrichment
+    expect(isPlanStale(basePlan, { scan, enrichment: e, maintenancePreference: 'low' })).toBe(false)
+  })
+})
+
+describe('confidenceSiteFromPlan (PROJ-13)', () => {
+  it('maps the plan snapshot onto the confidence module site input', () => {
+    expect(confidenceSiteFromPlan(basePlan)).toEqual({
+      soil: 'loam',
+      zone: 7,
+      rainfallMm: 750,
+      locationBasis: 'gps',
+      maintenance: 'low',
+    })
+  })
+
+  it('passes nulls through for pre-PROJ-13 plans so factors are skipped, not guessed', () => {
+    const old = { ...basePlan, snapshot_rainfall_mm: null, snapshot_location_basis: null }
+    const site = confidenceSiteFromPlan(old)
+    expect(site.rainfallMm).toBeNull()
+    expect(site.locationBasis).toBeNull()
   })
 })

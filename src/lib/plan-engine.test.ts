@@ -135,6 +135,58 @@ describe('native-first within a layer', () => {
   })
 })
 
+describe('band-led ranking (PROJ-13)', () => {
+  it('ranks a higher-band plant ahead of a lower-band one in the same layer — even a native', () => {
+    // Native B has a moisture conflict (wet plant, low-rainfall site) → worth_checking.
+    // Non-native A is clean → high. Band must beat the old native-first key.
+    const a = plant({ native: false, moisture: 'moist', latin_name: 'Zeta zeta' })
+    const b = plant({ native: true, moisture: 'wet', latin_name: 'Alpha alpha' })
+    const r = run({
+      scan: scan({ area_sqm: 3 }), // richness floor → only some picked; A must win
+      enrichment: enrichment({ rainfall_mm: 500, climate_status: 'success' }),
+      catalogue: [b, a],
+    })
+    expect(r.lines[0].plant.id).toBe(a.id)
+  })
+
+  it('ranks unverified-AI-trait plants (a data-gap band) behind clean ones', () => {
+    const clean = plant({ native: false, latin_name: 'Zeta zeta' })
+    const unverified = plant({
+      native: false,
+      ai_origin_fields: ['moisture'],
+      latin_name: 'Alpha alpha',
+    })
+    const r = run({ catalogue: [unverified, clean] })
+    expect(r.lines.map((l) => l.plant.id)).toEqual([clean.id, unverified.id])
+  })
+
+  it('keeps the original native-first order as the tiebreak within a band', () => {
+    const nonNative = plant({ native: false, latin_name: 'Alpha alpha' })
+    const native = plant({ native: true, latin_name: 'Zeta zeta' })
+    const r = run({ catalogue: [nonNative, native] }) // both clean → both 'high'
+    expect(r.lines.map((l) => l.plant.id)).toEqual([native.id, nonNative.id])
+  })
+
+  it('snapshots rainfall and location basis for the band (null when climate failed)', () => {
+    const withClimate = run({
+      catalogue: [plant()],
+      enrichment: enrichment({
+        rainfall_mm: 750,
+        climate_status: 'success',
+        location_basis: 'postcode_centroid',
+      }),
+    })
+    expect(withClimate.snapshot.rainfall_mm).toBe(750)
+    expect(withClimate.snapshot.location_basis).toBe('postcode_centroid')
+
+    const withoutClimate = run({
+      catalogue: [plant()],
+      enrichment: enrichment({ rainfall_mm: 750, climate_status: 'unavailable' }),
+    })
+    expect(withoutClimate.snapshot.rainfall_mm).toBeNull()
+  })
+})
+
 describe('soil flag', () => {
   it('flags a chosen plant whose soil compatibility misses the site soil', () => {
     const r = run({
