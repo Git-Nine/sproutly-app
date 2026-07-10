@@ -1,8 +1,8 @@
 # PROJ-14: Ecological Trait Enrichment (ETL extension)
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-07-10
-**Last Updated:** 2026-07-10
+**Last Updated:** 2026-07-10 (QA passed — /qa)
 
 ## Dependencies
 - Requires: PROJ-5 (Plant Database & Admin Interface) — the `plants` table these traits are added to
@@ -323,7 +323,79 @@ per the decision log → `import:plants:commit` → `import:plants:sync` backfil
 first naturadb.de field → band mapping (Open Question) + the reported coverage. `/qa` next.
 
 ## QA Test Results
-_To be added by /qa_
+
+**QA date:** 2026-07-10 · **Tester:** /qa · **Verdict: APPROVED** (no Critical/High bugs)
+
+### Scope note
+PROJ-14 is a data-pipeline / curator feature with **no end-user runtime surface** (that's
+PROJ-15). Its logic lives in pure, unit-testable modules (`scripts/lib/*.mjs`, `src/lib/plants.ts`)
+plus one admin-form side-door. So QA is: exhaustive code review against every AC, the full
+automated suite, a security/RLS audit, and a regression pass. Live-DB verification of the schema
+and the live pipeline coverage numbers are **deploy/curator-gated** (the migration is deliberately
+not yet applied) and are listed under "Deferred to deploy/curator" below — they are not bugs.
+
+### Automated suites
+| Suite | Result |
+|-------|--------|
+| Unit/integration (Vitest) | **440 / 440 pass** (417 → 440, +23 for PROJ-14) |
+| E2E (Playwright) | **92 / 92 pass** — zero regressions |
+| ESLint | clean |
+| Production build | clean |
+
+### Acceptance criteria
+| # | Criterion | Result | Evidence |
+|---|-----------|--------|----------|
+| 1 | New eco columns exist, all nullable, additive, no PROJ-6 read affected | ✅ PASS | Migration is all `add column if not exists`, nullable, no backfill; PROJ-6 engine never selects them; 252-site guardrail + full engine suite unchanged & green |
+| 2 | DB check constrains vocabulary (none/low/medium/high) + bloom 1–12 | ✅ PASS | `check` clauses in `20260710110000_*.sql`; `eco_ai_origin_fields <@` subset check |
+| 3 | `'none'` representable & distinct from NULL | ✅ PASS | CHECK allows `'none'`; column stays nullable; `catalogue.test.ts` "'none' ≠ null" |
+| 4 | Each eco trait returned with its own confidence | ✅ PASS | `confidenceSchema` has 4 eco keys; `ai-traits.test.ts` "returns eco traits + confidence" |
+| 5 | Any low-confidence eco trait → mandatory review, blocks commit | ✅ PASS | `needsMandatoryReview` scans both sets → one `review_required` gate; `planCommit`/`planSync` skip it; tested both ways |
+| 6 | Out-of-vocab / refusal fails loudly, no silent default | ✅ PASS | json_schema enums + zod re-validation; tests reject out-of-vocab band, half-set bloom, refusal |
+| 7 | Verified trait no longer marked AI-inferred | ✅ PASS | Curator removes field from `eco_ai_origin_fields`; coverage counts verified only when set AND absent from the array |
+| 8 | Live-row provenance truthfully shows AI vs verified | ✅ PASS | Separate `eco_ai_origin_fields` column; independent of survival `ai_origin_fields` |
+| 9 | ~160 ETL rows backfilled via sync | ✅ PASS | Eco columns + `eco_ai_origin_fields` added to `SYNCABLE_FIELDS`; `planSync` test backfills nulls → values |
+| 10 | Hand-seeded (`source='seed'`) rows untouched by sync | ✅ PASS | `planSync` skips `source !== 'open_data_etl'`; dedicated test |
+| 11 | Coverage reported on every live run (no silent partial) | ✅ PASS (code) | `ecologicalCoverageReport` + sync script prints per-trait verified/AI/not-assessed over a fresh post-update read. *Live numbers deploy-gated.* |
+| 12 | PROJ-11 suite passes + new co-located tests | ✅ PASS | 440 green incl. +18 catalogue, +5 ai-traits, +11 plants, +5 plant-form |
+| 13 | Plans identical after ship (engine unaffected) | ✅ PASS | PROJ-6 reads none of the new columns; engine + guardrail suites unchanged |
+
+**13 / 13 acceptance criteria pass** (AC-11 live coverage numbers deferred to the curator run).
+
+### Edge cases verified (in tests)
+- Year-wrapping bloom (`end < start`, Nov→Feb) accepted as valid everywhere (schema, coverage, form summary "(over winter)"). ✅
+- `'none'` wildlife value treated as assessed, never as a data gap. ✅
+- Half-set bloom pair rejected with a field-level error (both-or-neither) at schema, AI-schema, and form layers. ✅
+- Survival vs. ecological provenance tracked independently — a row can be survival-verified but ecologically unverified; sync never clobbers `ai_origin_fields`. ✅
+- Coverage counts bloom as assessed only when BOTH months set. ✅
+
+### Security audit (red-team) — clean
+- **RLS:** No policy change (correct). The plants table's PROJ-5 policies are row-level, so they cover the new columns automatically. The PROJ-5 plants RLS E2E still passes — a regular authenticated user **cannot** insert/update/delete a plant, so cannot write eco traits. Admin-only write confirmed live.
+- **Defense in depth:** DB check constraints reject out-of-vocabulary bands / out-of-range months even if app-layer validation were bypassed; `eco_ai_origin_fields <@ array[...]` blocks arbitrary strings in the provenance array.
+- **Attack surface:** No new API route, no new env var, no new secret, no runtime input path. Reads use `select('*')` (safe before migration — they simply omit absent columns). Nothing to inject.
+
+### Regression
+- Full E2E (92) green across PROJ-3–8 RLS/flows; unit suite 440 green. The additive, engine-untouched design means plan generation is byte-identical to before.
+- Production is **not** currently affected: the two PROJ-14 commits are local only (`HEAD` is 2 ahead of `origin/main`), so the eco-column-sending admin form is not yet live. Migration + push land together at `/deploy`.
+
+### Bugs found
+**None Critical / High / Medium.**
+
+**Observation (Low / informational — no fix required):** Editing an *ETL-owned* row's eco value via the admin form does not clear that trait's stale `eco_ai_origin_fields` entry (`savePlant` deliberately doesn't send the provenance array), so the coverage report would still count it AI-inferred. This is the documented, intended design — ETL rows are corrected via the YAML → `import:plants:sync` pipeline; the admin form side-door exists for the 2 hand-seeded rows, which carry NULL provenance and so are counted as verified once set. Worth a line in the curator runbook.
+
+### Deferred to deploy/curator (not bugs — gated on the migration + live pipeline)
+1. Apply `20260710110000_proj14_plants_ecological_traits.sql` via the Supabase dashboard SQL Editor, then confirm columns/constraints live and an admin plant save round-trips.
+2. Run the live pipeline (`import:plants` → naturadb.de curator review, wildlife values first → `import:plants:commit` → `import:plants:sync`) and record: the naturadb.de field → band mapping (Open Question) and the reported coverage numbers.
+3. Spot-check a sample of **high-confidence** eco traits against naturadb.de (the "high-confidence-but-wrong" native-flag failure mode — a curator-process check, not a code gate).
+
+### Test note
+No new QA tests were added: the implementation shipped with comprehensive co-located coverage of
+every AC's logic (`catalogue.test.ts`, `ai-traits.test.ts`, `plants.test.ts`, `plant-form.test.tsx`),
+and the only surface not covered by them — an admin-form save round-trip against the live DB — is
+deploy-gated (needs the migration applied) rather than genuinely untestable, so a live E2E for it
+belongs after deploy.
+
+## Deployment
+_To be added by /deploy_
 
 ## Deployment
 _To be added by /deploy_
