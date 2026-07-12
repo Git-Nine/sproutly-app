@@ -49,11 +49,11 @@ function newEnrichment(scanId: string, userId: string) {
     soil_type: 'loam',
     soil_status: 'success',
     rainfall_mm: 580,
-    annual_min_temp: -8.5,
+    jan_mean_min_temp: -1.1,
     frost_days: 45,
     climate_status: 'success',
     climate_period: '1991–2020',
-    hardiness_zone: '9',
+    hardiness_zone: '7',
     zone_status: 'success',
     location_basis: 'postcode_centroid',
   }

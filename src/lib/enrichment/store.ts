@@ -13,7 +13,7 @@ export type EnrichmentFields = {
   soil_type?: string
   soil_status?: 'pending' | 'success' | 'unavailable'
   rainfall_mm?: number
-  annual_min_temp?: number
+  jan_mean_min_temp?: number
   frost_days?: number
   climate_status?: 'pending' | 'success' | 'unavailable'
   climate_period?: string

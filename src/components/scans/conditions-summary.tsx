@@ -99,10 +99,10 @@ export function ConditionsSummary({
               />
               <ClimateRow
                 icon={<Thermometer className="h-4 w-4 text-accent" />}
-                label="Coldest winter low"
+                label="January night average"
                 value={
-                  enrichment.climate_status === 'success' && enrichment.annual_min_temp != null
-                    ? `${enrichment.annual_min_temp > 0 ? '+' : ''}${enrichment.annual_min_temp} °C`
+                  enrichment.climate_status === 'success' && enrichment.jan_mean_min_temp != null
+                    ? `${enrichment.jan_mean_min_temp > 0 ? '+' : ''}${enrichment.jan_mean_min_temp} °C`
                     : null
                 }
                 unavailable={enrichment.climate_status === 'unavailable'}
