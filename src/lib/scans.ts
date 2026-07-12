@@ -89,7 +89,7 @@ export type ScanEnrichment = {
   soil_type: Soil | null
   soil_status: EnrichmentFieldStatus
   rainfall_mm: number | null
-  annual_min_temp: number | null
+  jan_mean_min_temp: number | null
   frost_days: number | null
   climate_status: EnrichmentFieldStatus
   climate_period: string | null

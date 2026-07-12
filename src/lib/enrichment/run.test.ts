@@ -60,10 +60,10 @@ function mockStillCurrent() {
 function mockDwdSuccess() {
   const fakeGrid = { ncols: 1, nrows: 1, xllcorner: 0, yllcorner: 0, cellsize: 1, nodata: -999, values: new Float32Array([0]) }
   mockFetchGrid.mockResolvedValue(fakeGrid)
-  // Called 3× (precipitation, minTemp, frostDays) via gridValueAt
+  // Called 3× (precipitation, janMinTemp, frostDays) via gridValueAt
   mockGridValueAt
     .mockReturnValueOnce(640)   // precipitation: 640 mm raw (scale=1) → 640 mm/yr
-    .mockReturnValueOnce(-85)   // minTemp: -85 raw → -8.5 °C
+    .mockReturnValueOnce(-11)   // janMinTemp: -11 raw → -1.1 °C (Berlin)
     .mockReturnValueOnce(45)    // frostDays: 45 days/yr
 }
 
@@ -87,11 +87,11 @@ describe('runEnrichment', () => {
       soil_type: 'loam',
       soil_status: 'success',
       rainfall_mm: 640,
-      annual_min_temp: -8.5,
+      jan_mean_min_temp: -1.1,
       frost_days: 45,
       climate_status: 'success',
       climate_period: '1991–2020',
-      hardiness_zone: '9',  // -8.5 °C → zone 9 (< -7 °C)
+      hardiness_zone: '7',  // Jan mean min -1.1 °C → zone 7 (Berlin)
       zone_status: 'success',
       location_basis: 'gps',
     })
@@ -176,7 +176,7 @@ describe('runEnrichment', () => {
     mockFetchGrid.mockResolvedValue(fakeGrid)
     mockGridValueAt
       .mockReturnValueOnce(null)  // precipitation: NODATA / unsampled
-      .mockReturnValueOnce(-85)   // minTemp: -8.5 °C
+      .mockReturnValueOnce(-11)   // janMinTemp: -1.1 °C
       .mockReturnValueOnce(45)    // frostDays
 
     await runEnrichment({ scan: SCAN_DE, userId: USER_ID, requestedAt: REQUESTED_AT })
@@ -186,7 +186,7 @@ describe('runEnrichment', () => {
     expect(write.status).toBe('partial')      // honest: retry stays reachable
     expect(write).toMatchObject({
       climate_status: 'success',
-      hardiness_zone: '9', // the sampled fields still work
+      hardiness_zone: '7', // the sampled fields still work
       zone_status: 'success',
     })
   })
@@ -201,14 +201,14 @@ describe('runEnrichment', () => {
     mockFetchGrid.mockResolvedValue(fakeGrid)
     mockGridValueAt
       .mockReturnValueOnce(640)   // precipitation
-      .mockReturnValueOnce(null)  // minTemp: NODATA / unsampled
+      .mockReturnValueOnce(null)  // janMinTemp: NODATA / unsampled
       .mockReturnValueOnce(45)    // frostDays
 
     await runEnrichment({ scan: SCAN_DE, userId: USER_ID, requestedAt: REQUESTED_AT })
 
     const write = adminUpsert.mock.calls[0][0] as Record<string, unknown>
     expect(write.hardiness_zone).toBeUndefined()
-    expect(write.annual_min_temp).toBeUndefined()
+    expect(write.jan_mean_min_temp).toBeUndefined()
     expect(write.status).toBe('partial')
     expect(write).toMatchObject({
       rainfall_mm: 640,
@@ -227,14 +227,20 @@ describe('runEnrichment', () => {
     expect(adminUpsert).not.toHaveBeenCalled()
   })
 
+  // Fixtures are real 2026-07-12 DWD January grid samples at cities with a
+  // published Winterhärtezone — the calibration set for the thresholds.
   it.each([
-    [-30, '5'],
-    [-25, '6'],
-    [-20, '7'],
-    [-14, '8'],
-    [-9,  '9'],
-    [-3,  '10'],
-  ])('derives hardiness zone for annual min %s °C → zone %s', async (minTemp, expectedZone) => {
+    [-10.0, '5'],  // high Alps / deep Erzgebirge
+    [-7.3,  '6'],  // Oberstdorf
+    [-4.9,  '6'],  // Harz
+    [-3.5,  '7'],  // Passau
+    [-2.2,  '7'],  // München
+    [-1.1,  '7'],  // Berlin
+    [-0.8,  '8'],  // Stuttgart
+    [0.2,   '8'],  // Frankfurt
+    [1.3,   '8'],  // Köln
+    [3.0,   '9'],  // milder than any sampled German city
+  ])('derives hardiness zone for January mean min %s °C → zone %s', async (janMinTemp, expectedZone) => {
     mockStillCurrent()
     mockFetchSoilType.mockResolvedValue(null)
 
@@ -242,7 +248,7 @@ describe('runEnrichment', () => {
     mockFetchGrid.mockResolvedValue(fakeGrid)
     mockGridValueAt
       .mockReturnValueOnce(6400)
-      .mockReturnValueOnce(minTemp * 10)  // DWD stores ×10
+      .mockReturnValueOnce(janMinTemp * 10)  // DWD stores ×10
       .mockReturnValueOnce(45)
 
     await runEnrichment({ scan: SCAN_DE, userId: USER_ID, requestedAt: REQUESTED_AT })
