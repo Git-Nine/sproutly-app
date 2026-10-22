@@ -1,330 +1,159 @@
-# AI Coding Starter Kit
+# 🌱 Sproutly
 
-> Build production-ready web apps faster with AI-powered Skills handling Requirements, Architecture, Development, QA, and Deployment.
+**From a photo of a garden to a personalised, ecologically grounded planting plan — in under 5 minutes.**
 
-This template uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with modern Skills, Rules, and Sub-Agents to provide a complete AI-powered development workflow.
+Sproutly is a full-stack, production-deployed Next.js application that takes a photo of an outdoor space and turns it into a survivable, native-plant planting plan and shopping list. It's Germany-first: every recommendation is grounded in real local data — government soil surveys, weather grids, and hardiness zones — not generic advice.
 
-## Quick Start
+**Live app:** [sproutly-green.de](https://sproutly-green.de)
+**Stack:** Next.js 16 · TypeScript · Supabase (Postgres/Auth/Storage) · Tailwind + shadcn/ui · Claude (Anthropic) · n8n · Vercel
 
-### 1. Clone & Install
+---
 
-```bash
-git clone https://github.com/YOUR_USERNAME/ai-coding-starter-kit.git my-project
-cd my-project
-npm install
-npx playwright install chromium   # one-time: installs browser for E2E tests (~300MB)
+## Why this project is worth a second look
+
+This isn't a CRUD tutorial app. It's a real product with a real security model, a deterministic recommendation engine, two live AI integrations, and a test suite that actually gets run on every pull request:
+
+- **26 database migrations**, Row Level Security enforced on every user-data table, and a private per-user storage namespace for uploaded photos — verified not just by code review but by **Playwright end-to-end tests that seed two real accounts and prove one user can never read another's data**.
+- **A deterministic, pure rule engine** (`src/lib/plan-engine.ts`) that filters ~160 native species by sun, hardiness zone, soil, and physical fit, then layers and quantifies a plan — same inputs always produce the same output, so it's fully unit-testable and safe to reuse for interactive editing.
+- **Two production AI integrations**, each with an explicit failure contract: a Claude vision workflow that pre-fills the photo-scan form, and a Claude-curated plan composition + natural-language rationale — both wired through n8n webhooks with hard timeouts, and both **degrade silently to the deterministic fallback** on any failure, so an AI outage never breaks the core journey.
+- **A custom ETL pipeline** (`scripts/`) that pulls Germany's official native-plant data (FloraWeb/BfN), uses an LLM to infer ecological traits (pollinator/bird value, bloom windows) with a human-review gate before anything ships live, and syncs corrections back to production without ever clobbering hand-verified rows.
+- **440 passing unit/integration tests** across 42 files (Vitest) plus **dedicated Playwright RLS-isolation suites** for auth, scans, plans, and admin routes — enforced by a GitHub Actions CI gate (lint → test → build) on every PR.
+- **15 features shipped through a disciplined, spec-first workflow** — every feature has a written spec with acceptance criteria *before* code, a QA pass against those criteria, and a deploy log with rollback candidates. `features/INDEX.md` tracks all 15 end to end.
+
+---
+
+## The product
+
+**The problem:** millions of people replace gardens with gravel and sealed surfaces, believing it's the responsible, low-effort choice. When they consider planting instead, decision paralysis wins — no product connects local ecology to a single, confident, personal decision.
+
+**The flow — Scan → Plan → Order → Grow:**
+
+1. **Scan** — upload a photo of the space (camera or library). EXIF GPS is extracted automatically; a Claude vision workflow pre-fills surface, space type, sun exposure, and area on an editable "here's what we see" screen.
+2. **Enrich** — the app geocodes the location and pulls real environmental data: soil type (BGR), annual rainfall (DWD weather grid), and winter hardiness zone — all German open-government data sources, with graceful degradation if any one is unavailable.
+3. **Plan** — the rule engine filters the ~160-species catalogue down to what can actually survive the site, then optionally hands the survivor list to a Claude-curated composition step that picks a considered mix and writes a plain-language rationale ("why this plan," "why this one"). Every plant shows a banded survival-confidence indicator instead of a fabricated percentage.
+4. **Review & order** — an interactive plan editor (auto-save, staleness detection, duplicate-line merging) hands off to a layer-grouped shopping list with deep links to German nurseries.
+
+Target users, from the product spec: *Maya*, who wants to act on climate anxiety but needs someone to make the decision for her, and *Thomas*, a pragmatic "rockery defender" who needs evidence before any environmental appeal.
+
+---
+
+## Architecture highlights
+
+### Security model (enforced in the database, not just the app)
+- Row Level Security on every user-data table (`user_id = auth.uid()`); the `plan_plants` policy joins through `plans` to verify ownership rather than trusting a client-supplied id.
+- Uploaded photos live in a **private**, user-namespaced Storage bucket (`/{user_id}/filename`) — never publicly listable.
+- Admin routes (plant catalogue CRUD) are gated by a `role` column, checked server-side.
+- A real bug this rigor caught: a Zod `.url()` validator on plant images originally accepted `javascript:`/`data:` schemes — found in the QA phase, fixed before it shipped.
+
+### AI designed as a swap-in, not a rewrite
+The PRD deliberately built v1 with rules and manual input, but shaped every seam so AI/ML drops in without restructuring the database or frontend:
+
+| Stage | v1 (built) | AI swap-in (built on top, same output shape) |
+|---|---|---|
+| Scan | Manual form + EXIF | ✅ Claude vision pre-fill, editable before save |
+| Plan | Rule engine over the plant DB | ✅ Claude curates composition + writes rationale, engine still computes quantities and re-validates every AI answer |
+| Order | Deep links + shopping list | Real garden-centre API + calibrated survival score (roadmap) |
+
+Both AI routes share the same contract: **the server re-derives the ground truth itself** (survivors, RLS-scoped data) rather than trusting anything the model or client sends back, validates the AI's answer against a strict schema (IDs must be a subset of survivors, counts within bounds, length caps), and returns HTTP 200 with a "not curated" flag on *any* failure — timeout, malformed JSON, n8n outage — so a broken AI dependency degrades invisibly instead of breaking the user's plan.
+
+### A pure, testable recommendation engine
+`plan-engine.ts` is intentionally side-effect-free: no I/O, no `Date.now()`, no randomness. Given a scan, its environmental enrichment, the plant catalogue, and a maintenance preference, it always returns the same plan — which makes it trivial to unit test exhaustively and safe to reuse for the interactive plan editor without divergent logic paths.
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 16 (App Router), React 19, TypeScript |
+| Styling / UI | Tailwind CSS, shadcn/ui, Radix primitives |
+| Backend | Supabase — Postgres, Auth (magic link), Storage, Row Level Security |
+| Validation | Zod, react-hook-form |
+| AI | Anthropic Claude (vision + text) via n8n webhook workflows |
+| Testing | Vitest + Testing Library (unit/integration), Playwright (E2E + RLS isolation) |
+| CI/CD | GitHub Actions (lint → test → build), Vercel (auto-deploy on push to `main`) |
+| External data | BGR (soil), DWD (weather/climate grid), FloraWeb/BfN (native plant catalogue) |
+
+---
+
+## Quality bar
+
+```
+✓ 440/440 unit & integration tests passing   (vitest run — verified)
+✓ 42 test files, co-located with source
+✓ Dedicated Playwright suites proving cross-account RLS isolation
+  for auth, scans, environmental enrichment, plans, and admin routes
+✓ ESLint clean
+✓ CI gate on every pull request: lint → test → build
 ```
 
-### 2. (Optional) Supabase Setup
+Every one of the 15 shipped features went through the same pipeline: a written spec with acceptance criteria, an architecture pass, implementation, a QA pass that checks off each criterion and audits for security regressions, and a logged deploy with a recorded rollback candidate. The full history is in `features/INDEX.md` and `features/PROJ-*.md`.
 
-If you need a backend:
+---
 
-1. Create Supabase Project: [supabase.com](https://supabase.com)
-2. Copy `.env.local.example` to `.env.local`
-3. Add your Supabase credentials
-4. Uncomment the Supabase client in `src/lib/supabase.ts`
+## Project structure
 
-Skip this step if you're building frontend-only (landing pages, portfolios, etc.)
+```
+sproutly-app/
+├── src/
+│   ├── app/                 Next.js App Router — pages + API routes
+│   │   └── api/                 classify-vision, curate-plan, enrich, geocode, account
+│   ├── components/           UI components (plans, admin, ui primitives)
+│   ├── lib/
+│   │   ├── plan-engine.ts       Pure, deterministic recommendation engine
+│   │   ├── plan-confidence.ts   Banded survival-confidence scoring
+│   │   ├── plan-curation.ts     AI curation validation + application
+│   │   ├── enrichment/          Soil / climate / moisture enrichment pipeline
+│   │   ├── bgr.ts, dwd-grid.ts  German open-data API clients
+│   │   └── supabase/            Client, server, middleware, admin clients
+│   └── hooks/
+├── supabase/migrations/      26 SQL migrations (schema + RLS policies)
+├── scripts/                  Plant catalogue ETL (FloraWeb import → AI trait
+│                              inference → human review → sync to production)
+├── tests/                    Playwright E2E + RLS-isolation suites
+├── docs/                     PRD, design system, n8n workflow specs,
+│                              production runbooks
+└── features/                 One spec per feature, with QA + deploy logs
+```
 
-### 3. Start Development
+---
+
+## Getting started
 
 ```bash
+git clone https://github.com/Git-Nine/sproutly-app.git
+cd sproutly-app
+npm install
+npx playwright install chromium   # one-time, for E2E tests
+
+cp .env.local.example .env.local
+# fill in NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY
+# (+ SUPABASE_SERVICE_ROLE_KEY and ANTHROPIC_API_KEY if running the catalogue ETL)
+
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-### 4. Initialize Your Project
-
-Open Claude Code and run `/init` with a brief description of your idea:
-
-```
-/init I want to build a project management tool for small teams
-where users can create projects, assign tasks, and track progress.
-```
-
-The skill interviews you one question at a time (**Grill Me** principle — always with a recommended answer you just confirm or correct) until there's a shared understanding. It then:
-1. Creates your **Product Requirements Document** (`docs/PRD.md`)
-2. Breaks the project into a prioritized feature map (P0/P1/P2)
-3. Updates **feature tracking** (`features/INDEX.md`)
-4. Recommends which feature to build first
-
-### 5. Spec Your First Feature
-
-After initialization, create a detailed spec for the first feature:
-
-```
-/write-spec PROJ-1
-```
-
-The skill interviews you about this single feature in depth — user stories, edge cases, acceptance criteria. Use `/refine PROJ-X` at any point to revisit and improve an existing spec.
-
-### 6. Build Features
-
-```
-/architecture    Design the tech approach for features/PROJ-1-user-auth.md
-/frontend        Build the UI for features/PROJ-1-user-auth.md
-/backend         Build the API for features/PROJ-1-user-auth.md
-/qa              Test features/PROJ-1-user-auth.md
-/deploy          Deploy to Vercel
-```
-
-Each skill suggests the next step when it finishes. Handoffs are always user-initiated.
-
----
-
-## Available Skills
-
-| Skill | Command | What It Does |
-|-------|---------|-------------|
-| Project Initializer | `/init` | One-time setup: creates PRD + feature map via Grill Me interview |
-| Feature Spec Writer | `/write-spec` | Creates a full spec for one feature (user stories, AC, edge cases) |
-| Spec Refiner | `/refine PROJ-X` | Reopens an existing spec to improve, extend, or challenge it |
-| Solution Architect | `/architecture` | Designs PM-friendly tech architecture (no code, only high-level design) |
-| Frontend Developer | `/frontend` | Builds UI with React, Tailwind CSS, and shadcn/ui |
-| Backend Developer | `/backend` | Builds APIs, database schemas, RLS policies with Supabase |
-| QA Engineer | `/qa` | Tests features against acceptance criteria + security audit |
-| DevOps | `/deploy` | Deploys to Vercel with production-ready checks |
-| Help | `/help` | Context-aware guide: shows where you are and what to do next |
-
-### How Skills Work
-
-- **Skills** are defined in `.claude/skills/` and auto-discovered by Claude Code
-- **Rules** in `.claude/rules/` are auto-applied based on file context (no manual loading)
-- **Sub-Agents** run heavy tasks (frontend, backend, QA) in isolated contexts for cost efficiency
-- **CLAUDE.md** provides project context automatically at every session start
-
----
-
-## Development Workflow
-
-```
-0. Setup     /init          -->  PRD + feature map (once per project)
-1. Spec      /write-spec      -->  Feature spec in features/PROJ-X.md
-             /refine PROJ-X -->  Revisit and improve an existing spec
-2. Design    /architecture  -->  Tech design added to feature spec
-3. Build     /frontend      -->  UI components implemented
-             /backend       -->  APIs + database (if needed)
-4. Test      /qa            -->  Test results added to feature spec
-5. Ship      /deploy        -->  Deployed to Vercel
-```
-
-### Feature Tracking
-
-Features are tracked in `features/INDEX.md`:
-
-| ID | Feature | Status | Spec |
-|----|---------|--------|------|
-| PROJ-1 | User Login | Deployed | [Spec](features/PROJ-1-user-login.md) |
-| PROJ-2 | Dashboard | In Progress | [Spec](features/PROJ-2-dashboard.md) |
-
-Every skill reads this file at start and updates it when done, preventing duplicate work.
-
----
-
-## Tech Stack
-
-| Category | Tool | Why? |
-|----------|------|------|
-| **Framework** | Next.js 16 | React + Server Components + App Router |
-| **Language** | TypeScript | Type safety |
-| **Styling** | Tailwind CSS | Utility-first CSS |
-| **UI Library** | shadcn/ui | Copy-paste, customizable components |
-| **Backend** | Supabase (optional) | PostgreSQL + Auth + Storage + Realtime |
-| **Deployment** | Vercel | Zero-config Next.js hosting |
-| **Validation** | Zod | Runtime type validation |
-
----
-
-## Project Structure
-
-```
-ai-coding-starter-kit/
-+-- CLAUDE.md                        <-- Auto-loaded project context
-+-- .claude/
-|   +-- settings.json                <-- Team permissions (committed)
-|   +-- settings.local.json          <-- Personal overrides (gitignored)
-|   +-- rules/                       <-- Auto-applied coding rules
-|   |   +-- general.md                   Git workflow, feature tracking
-|   |   +-- frontend.md                  shadcn/ui, component standards
-|   |   +-- backend.md                   RLS, validation, queries
-|   |   +-- security.md                  Secrets, headers, auth
-|   +-- skills/                      <-- Invocable workflows (/command)
-|   |   +-- init/SKILL.md                /init
-|   |   +-- write-spec/SKILL.md           /write-spec
-|   |   +-- refine/SKILL.md              /refine
-|   |   +-- architecture/SKILL.md        /architecture
-|   |   +-- frontend/SKILL.md            /frontend (runs as sub-agent)
-|   |   +-- backend/SKILL.md             /backend (runs as sub-agent)
-|   |   +-- qa/SKILL.md                  /qa (runs as sub-agent)
-|   |   +-- deploy/SKILL.md              /deploy
-|   |   +-- help/SKILL.md                /help
-|   +-- agents/                      <-- Sub-agent configs
-|       +-- frontend-dev.md              Model, tools, limits
-|       +-- backend-dev.md
-|       +-- qa-engineer.md
-+-- features/                        <-- Feature specifications
-|   +-- INDEX.md                         Status tracking
-|   +-- README.md                        Spec format documentation
-+-- docs/
-|   +-- PRD.md                       <-- Product Requirements Document
-|   +-- production/                  <-- Production setup guides
-|       +-- error-tracking.md            Sentry setup (5 min)
-|       +-- security-headers.md          XSS/Clickjacking protection
-|       +-- performance.md               Lighthouse, optimization
-|       +-- database-optimization.md     Indexing, N+1, caching
-|       +-- rate-limiting.md             Upstash Redis
-+-- src/
-|   +-- app/                         <-- Pages (Next.js App Router)
-|   +-- components/
-|   |   +-- ui/                      <-- shadcn/ui components (35+ installed)
-|   +-- hooks/                       <-- Custom React hooks
-|   +-- lib/                         <-- Utilities
-+-- public/                          <-- Static files
-```
-
----
-
-## Getting Started
-
-### 1. Initialize the Project
-
-Run `/init` with a brief description of your idea. The skill interviews you one question at a time and fills out `docs/PRD.md` with your vision, target users, and a prioritized feature map.
-
-### 2. Spec Your First Feature
-
-Run `/write-spec PROJ-1`. The skill interviews you in depth about this single feature and creates a complete spec in `features/PROJ-1-name.md` — user stories, acceptance criteria, edge cases. Then suggest running `/architecture` as the next step.
-
-### 3. Add shadcn/ui Components (as needed)
-
-35+ components are pre-installed. Add more as needed:
 ```bash
-npx shadcn@latest add [component-name]
-```
-
-### 4. Production Setup (first deployment)
-
-When you're ready to deploy, the `/deploy` skill guides you through:
-- Vercel setup and deployment
-- Error tracking with Sentry
-- Security headers configuration
-- Performance monitoring with Lighthouse
-
-See `docs/production/` for detailed setup guides.
-
----
-
-## How It Works Under the Hood
-
-### Skills (`.claude/skills/`)
-Each skill is a structured workflow that Claude Code discovers automatically. Skills can run inline (in the main conversation) or as forked sub-agents (isolated context window).
-
-| Skill | Execution | Why? |
-|-------|-----------|------|
-| `/init` | Inline | Needs live interview with user |
-| `/write-spec` | Inline | Needs live interview with user |
-| `/refine` | Inline | Needs live interview with user |
-| `/architecture` | Inline | Short output, user reviews in real-time |
-| `/frontend` | Sub-agent (forked) | Heavy file editing, lots of output |
-| `/backend` | Sub-agent (forked) | Heavy file editing, SQL, API code |
-| `/qa` | Sub-agent (forked) | Systematic testing, lots of output |
-| `/deploy` | Inline | Deployment needs user oversight |
-| `/help` | Inline | Quick status check and guidance |
-
-### Rules (`.claude/rules/`)
-Coding standards that are auto-applied based on which files Claude is working with. No manual loading needed.
-
-### Sub-Agent Configs (`.claude/agents/`)
-Lightweight configurations that define model, tool access, and turn limits for forked skills.
-
-### CLAUDE.md
-Auto-loaded at every session start. Contains tech stack, conventions, and references to PRD and feature index.
-
----
-
-## Context Engineering
-
-AI agents work best with clean, structured context - not longer prompts. This template is designed around these principles:
-
-### State lives in files, not in memory
-
-Every skill reads `features/INDEX.md` and the relevant feature spec at start. After context compaction or a new session, nothing is lost - the agent simply re-reads the files. Progress tracking, acceptance criteria, and tech designs all live in markdown files, not in the conversation.
-
-### Context is layered
-
-Not everything is loaded at once. Information is layered by relevance:
-
-| Layer | What | When loaded |
-|-------|------|-------------|
-| `CLAUDE.md` | Tech stack, conventions, commands | Every session (auto) |
-| `.claude/rules/` | Coding standards | When editing matching files (auto) |
-| Skill `SKILL.md` | Workflow instructions | When skill is invoked |
-| Feature spec | Requirements, AC, tech design | On demand (skill reads it) |
-| `docs/production/` | Deployment guides | Only when referenced |
-
-### Context is isolated
-
-Heavy implementation skills (`/frontend`, `/backend`, `/qa`) run as **forked sub-agents** with their own context window. Research noise from one skill doesn't pollute another. Each fork starts clean and loads only what it needs.
-
-### Context recovery is built in
-
-All forked skills include a **Context Recovery** section: if the context is compacted mid-task, the agent re-reads the feature spec, checks `git diff` for progress, and continues without restarting or duplicating work.
-
-### Always read, never guess
-
-A global rule (`rules/general.md`) enforces: always read a file before modifying it, never assume contents from memory, verify import paths and API routes by reading. This prevents hallucinated code references - the most common source of AI coding errors.
-
----
-
-## Customization for Your Team
-
-This template is designed as a starting point. Customize it for your team:
-
-1. **Edit CLAUDE.md** - Add your project-specific conventions and build commands
-2. **Edit docs/PRD.md** - Define your product vision and roadmap
-3. **Edit .claude/rules/** - Adjust coding standards for your team
-4. **Edit .claude/skills/** - Modify workflows to match your process
-5. **Edit .claude/settings.json** - Configure team permissions
-
----
-
-## Production Guides
-
-Standalone guides in `docs/production/`:
-
-| Guide | Setup Time | What It Does |
-|-------|-----------|-------------|
-| [Error Tracking](docs/production/error-tracking.md) | 5 min | Sentry integration for automatic error capture |
-| [Security Headers](docs/production/security-headers.md) | 2 min | XSS, Clickjacking, MIME sniffing protection |
-| [Performance](docs/production/performance.md) | 10 min | Lighthouse checks, image optimization, caching |
-| [Database Optimization](docs/production/database-optimization.md) | 15 min | Indexing, N+1 prevention, query optimization |
-| [Rate Limiting](docs/production/rate-limiting.md) | 10 min | Upstash Redis for API abuse prevention |
-
----
-
-## Scripts
-
-```bash
-npm run dev          # Development server (localhost:3000)
-npm run build        # Production build
-npm run start        # Production server
-npm run lint         # ESLint
-npm test             # Vitest: integration tests for API routes
-npm run test:e2e     # Playwright: E2E tests for user flows
-npm run test:all     # Run both test suites
+npm test           # unit/integration tests (Vitest)
+npm run test:e2e   # end-to-end + RLS isolation tests (Playwright)
+npm run lint        # ESLint
+npm run build       # production build
 ```
 
 ---
 
-## Author
+## What's shipped vs. roadmap
 
-Created by **Alex Sprogis** – AI Product Engineer & Content Creator.
+**Shipped (production):** infrastructure & auth, photo scan with AI pre-fill, environmental enrichment, plant catalogue & admin CRUD, rule-based plan generation, interactive plan review, shopping list, catalogue ETL, AI plan curation & rationale, survival-confidence banding, ecological trait enrichment.
 
-- [YouTube](https://www.youtube.com/@alex.sprogis)
-- [Website](https://alexsprogis.de)
+**Roadmap:** progress-photo log, in-app notifications, a biodiversity indicator built on the verified ecological data already collected.
 
 ---
+
+## Background
+
+Built by **Janine Prange** ([@Git-Nine](https://github.com/Git-Nine)) as the capstone project for an AI Software Engineering bootcamp — an exercise in directing an agentic AI coding workflow through a full product build: spec → architecture → implementation → QA → deploy, with a human decision at every gate, rather than open-ended "vibe coding." Scaffolded from Alex Sprogis's "AI Coding Starter Kit" template (Claude Code skills, rules, and sub-agent scaffolding); every feature, data pipeline, and AI integration in `src/`, `scripts/`, `supabase/`, and `features/` — 96 commits across 15 shipped features — is original work built on top of it.
 
 ## License
 
-MIT License - feel free to use for your projects!
+MIT
