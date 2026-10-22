@@ -1,8 +1,8 @@
 # PROJ-12: AI Plan Curation & Rationale
 
-## Status: In Progress
+## Status: Deployed
 **Created:** 2026-07-07
-**Last Updated:** 2026-07-08 (/backend complete — see Implementation Notes)
+**Last Updated:** 2026-07-09 (deployed — env vars set in Vercel, n8n workflow live, smoke-tested)
 
 ## Dependencies
 - Requires: PROJ-6 (Rule-Based Plan Generation) — the hard-filter survivors, quantity maths, snapshot, and `findConstraintViolations()` guardrail this feature builds on
@@ -272,4 +272,41 @@ End-to-end verified: real scan (60 m² sandy full-sun gravel front garden) → "
 _To be added by /qa_
 
 ## Deployment
-_To be added by /deploy_
+**Deployed 2026-07-09.** Merged to `main` via PR #14 (squash) and auto-deployed to Vercel.
+Deploy gates satisfied:
+- `N8N_CURATE_WEBHOOK_URL` + `N8N_CURATE_SECRET` set in Vercel (production).
+- Migration `20260708100000_proj12_plan_rationale.sql` applied (2026-07-09).
+- n8n "Plan Curation" workflow imported, fixed (Expression-mode prompt, `claude-haiku-4-5`), and Active.
+- Live smoke-test passed in production — curated plans with rationale render end-to-end;
+  silent fallback to the rule-engine plan confirmed safe on failure.
+
+**One housekeeping loose end:** the `N8N_CURATE_*` placeholder lines still need adding to
+`.env.local.example` (writes to env files remain blocked by local permission settings). This is
+documentation-only — production is fully configured and live.
+
+> Still open as of 2026-10-22 — env-file reads *and* writes remain permission-blocked for the
+> assistant, so this stays a manual edit. The exact lines are in the "Post-Deploy Change"
+> section below.
+
+## Post-Deploy Change — curation AI provider moved to OpenRouter (2026-10-22)
+
+User-driven (cost / routing flexibility), planned since 2026-08. The curation workflow's AI step moved off the Anthropic n8n node to **OpenRouter's OpenAI-compatible endpoint**. **No app change:** `/api/curate-plan` talks to n8n, not to a model — no code, no env var, no redeploy; `N8N_CURATE_SECRET` is webhook auth and unrelated to the model key.
+
+**What changed in `docs/n8n/plan-curation.workflow.json`:**
+- `Curate (Claude)` (`@n8n/n8n-nodes-langchain.anthropic`, text/message) → **`Build request`** (Code) → **`Curate (OpenRouter)`** (HTTP Request, `POST https://openrouter.ai/api/v1/chat/completions`, Header Auth, timeout **12s** inside the route's 15s abort — so an overrun shows as a failed n8n execution instead of a client-side abort with no record).
+- **The prompt moved into the Code node**, verbatim, with the model slug as one `MODEL` constant and the payload appended via real `JSON.stringify($('Webhook').item.json.body)`. This **designs out deploy-gate issue #1 above**: the 2026-07-09 expression-mode bug (a "Fixed" prompt field sending `{{ }}` literally → `no_curation` on every run) is now structurally impossible. The historical gotcha is kept in the workflow doc, marked as designed out.
+- **`Parse & validate` parser patched and made provider-agnostic:** `item.choices?.[0]?.message?.content` is tried **first**, Anthropic's `text`/`content` shapes retained. **This was the hidden work** — the old parser left `text` empty on an OpenRouter reply → `JSON.parse('')` throws → `no_curation`, which the app absorbs silently: plan renders from the rule engine with **no "Why this plan" card and no error**.
+- Model choice stays a **latency** decision (deploy-gate finding #3): the committed slug is `anthropic/claude-haiku-4.5`. Upgrading for copy quality still means raising `N8N_TIMEOUT_MS` (route), the client guard in `plans-client.ts`, **and** the HTTP node's timeout together.
+
+**Tests:** new `scripts/n8n-workflows.test.ts` (**37 tests**, shared with PROJ-3) loads the committed workflow JSON and runs each Code node against recorded reply shapes. Curation coverage: OpenRouter + both Anthropic shapes → `ok`; unknown wrapper / empty / prose / malformed → `no_curation`; off-menu id, duplicate id, pick count outside `bounds`, over-long intro/why (bounds and limits taken from `CURATION_INTRO_MAX` / `CURATION_WHY_MAX` in `src/lib/plan-curation.ts`, so the prompt and the validator can't drift), missing intro/why. Build-request side asserts the request JSON is really interpolated (`not.toContain('{{')`) — a direct regression test for the 2026-07-09 bug — plus the output contract and the no-invented-numbers / no-moralizing rules surviving verbatim. **Mutation-checked:** removing the `choices` branch fails 7 tests across both workflows. Suite 461 → **498/498**, lint + build clean.
+
+**Docs:** `docs/n8n-plan-curation-workflow.md` updated (provider line, node sections, env table showing the key as an n8n *credential*, import credential table, historical gotcha reframed). New `docs/n8n-self-host-runbook.md` covers standing the instance up on a €4–5/mo VPS instead of n8n Cloud — including the `WEBHOOK_URL` trip-up and a pre-cutover curl suite, with the two webhook env vars + redeploy as the only app-side change.
+
+**Lines still to add to `.env.local.example` by hand** (unchanged ask from the 2026-07-09 loose end):
+
+```
+N8N_CURATE_WEBHOOK_URL=https://n8n.example.com/webhook/plan-curation
+N8N_CURATE_SECRET=replace-with-a-long-random-string
+```
+
+**Status:** repo side complete. **Ops steps still pending on the live n8n instance** — create the OpenRouter Header Auth credential, re-import/rebuild the workflow, confirm the `MODEL` slug exists on the account (the committed one is an unverified placeholder). Until then production keeps running the old Anthropic workflow, unaffected.
