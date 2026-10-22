@@ -24,42 +24,48 @@
     },
     {
       "parameters": {
-        "resource": "image",
-        "operation": "analyze",
-        "modelId": {
-          "__rl": true,
-          "mode": "list",
-          "value": "claude-sonnet-4-6",
-          "cachedResultName": "claude-sonnet-4-6"
-        },
-        "text": "=You are Sproutly's outdoor-space vision classifier for gardens in Germany. You receive ONE photo and classify it into a fixed schema. Output ONLY one minified JSON object, no markdown, no prose. Allowed fields and the ONLY allowed values: usable (boolean; false only if the photo is too blurry or dark to read, is indoors, or shows no outdoor space at all); is_plantable_space (boolean; true for ANY outdoor planting space including front garden, back garden, bed or border, balcony, or a paved or gravel area; do NOT set false merely because it is not a classic garden; balconies and gravel or paved areas are valid); confidence (number from 0 to 1); surface (one of gravel, lawn, soil, paved, mixed); space_type (one of front_garden, back_garden, balcony, bed); sun_exposure (one of full, partial, shade); area_sqm (integer from 1 to 5000, your best estimate of the plantable area in square metres); notes (a short one-line rationale). Never invent values outside the allowed sets. area_sqm must be a single integer. If usable is false, still return all fields with best guesses but set confidence low. Return JSON only. Postcode hint: {{ $('Webhook').item.json.body.postcode }}.",
-        "inputType": "url",
-        "imageUrls": "={{ $('Webhook').item.json.body.photo_url }}",
+        "jsCode": "// Build the OpenRouter chat/completions payload for the scan-vision classifier.\n// The prompt lives here (plain JS) rather than inside the HTTP node's JSON body so\n// apostrophes, quotes and newlines need no double escaping, and the model slug is\n// one constant to swap.\n//\n// ⚠ Verify the slug at https://openrouter.ai/models — OpenRouter slugs are\n// `vendor/model` and do change. Keep a FAST vision model: /api/classify-vision\n// aborts the whole call at 30s (N8N_TIMEOUT_MS).\nconst MODEL = 'anthropic/claude-sonnet-4.5';\n\nconst body = $('Webhook').item.json.body || {};\n\n// Enum source of truth: src/lib/scans.ts + supabase/migrations/20260618130000_proj3_scans.sql\nconst PROMPT =\n  \"You are Sproutly's outdoor-space vision classifier for gardens in Germany. You receive ONE photo and classify it into a fixed schema. Output ONLY one minified JSON object, no markdown, no prose. Allowed fields and the ONLY allowed values: usable (boolean; false only if the photo is too blurry or dark to read, is indoors, or shows no outdoor space at all); is_plantable_space (boolean; true for ANY outdoor planting space including front garden, back garden, bed or border, balcony, or a paved or gravel area; do NOT set false merely because it is not a classic garden; balconies and gravel or paved areas are valid); confidence (number from 0 to 1); surface (one of gravel, lawn, soil, paved, mixed); space_type (one of front_garden, back_garden, balcony, bed); sun_exposure (one of full, partial, shade); area_sqm (integer from 1 to 5000, your best estimate of the plantable area in square metres); notes (a short one-line rationale). Never invent values outside the allowed sets. area_sqm must be a single integer. If usable is false, still return all fields with best guesses but set confidence low. Return JSON only. Postcode hint: \" +\n  (body.postcode ?? 'none');\n\nreturn [\n  {\n    json: {\n      payload: {\n        model: MODEL,\n        max_tokens: 400,\n        messages: [\n          {\n            role: 'user',\n            content: [\n              { type: 'text', text: PROMPT },\n              // The image is fetched SERVER-SIDE by OpenRouter's upstream provider,\n              // not by n8n — the URL must be publicly reachable. Production sends a\n              // ~120s Supabase signed URL, which works. See the workflow doc's gotcha.\n              { type: 'image_url', image_url: { url: body.photo_url } },\n            ],\n          },\n        ],\n      },\n    },\n  },\n];"
+      },
+      "id": "b1a1c0de-0007-4000-a000-000000000007",
+      "name": "Build request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [20, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
         "options": {
-          "maxTokens": 400
+          "timeout": 25000
         }
       },
       "id": "b1a1c0de-0002-4000-a000-000000000002",
-      "name": "Analyze Image (Claude)",
-      "type": "@n8n/n8n-nodes-langchain.anthropic",
-      "typeVersion": 1,
-      "position": [20, 300],
+      "name": "Analyze Image (OpenRouter)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 300],
       "credentials": {
-        "anthropicApi": {
-          "id": "REPLACE_WITH_ANTHROPIC_CRED_ID",
-          "name": "Anthropic API"
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_OPENROUTER_HEADER_AUTH_CRED_ID",
+          "name": "OpenRouter API (Authorization: Bearer sk-or-...)"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "// Parse Claude's JSON reply, re-validate against the scan enums, and shape the webhook response.\n// Enum source of truth: src/lib/scans.ts + supabase/migrations/20260618130000_proj3_scans.sql\nconst ENUMS = {\n  surface: ['gravel', 'lawn', 'soil', 'paved', 'mixed'],\n  space_type: ['front_garden', 'back_garden', 'balcony', 'bed'],\n  sun_exposure: ['full', 'partial', 'shade'],\n};\nconst inSet = (v, k) => ENUMS[k].includes(v);\n\n// Tolerant text extraction — works whether the upstream node is the AI 'Analyze Image'\n// node (text on $json.text or $json.content) or a raw HTTP Request ($json.content[0].text).\nfunction extractText(j) {\n  if (typeof j.text === 'string') return j.text;\n  const c = j.content;\n  if (typeof c === 'string') return c;\n  if (Array.isArray(c)) {\n    const t = c.find((b) => b && b.type === 'text' && typeof b.text === 'string');\n    if (t) return t.text;\n  }\n  if (Array.isArray(j.message?.content)) {\n    const t = j.message.content.find((b) => b && b.type === 'text' && typeof b.text === 'string');\n    if (t) return t.text;\n  }\n  return '{}';\n}\n\nlet raw = extractText($json).trim();\n// Defend against accidental markdown fences or prose around the JSON object.\nconst first = raw.indexOf('{');\nconst last = raw.lastIndexOf('}');\nif (first !== -1 && last !== -1) raw = raw.slice(first, last + 1);\n\nlet ai;\ntry {\n  ai = JSON.parse(raw);\n} catch (e) {\n  ai = { usable: false, confidence: 0 };\n}\n\nconst fieldsValid =\n  inSet(ai.surface, 'surface') &&\n  inSet(ai.space_type, 'space_type') &&\n  inSet(ai.sun_exposure, 'sun_exposure') &&\n  Number.isInteger(ai.area_sqm) && ai.area_sqm >= 1 && ai.area_sqm <= 5000;\n\nconst usable =\n  ai.usable === true &&\n  ai.is_plantable_space === true &&\n  (ai.confidence ?? 0) >= 0.5 &&\n  fieldsValid;\n\n// A photo is never rejected merely for 'not being a garden' — balconies/paved/gravel are valid.\nconst branch = usable ? 'ok' : 'fallback';\nconst status = usable ? 'ok' : (ai.usable === false ? 'rejected' : 'low_confidence');\n\nconst fields = usable\n  ? {\n      surface: ai.surface,\n      space_type: ai.space_type,\n      sun_exposure: ai.sun_exposure,\n      area_sqm: ai.area_sqm,\n    }\n  : null;\n\nreturn [\n  {\n    json: {\n      branch,\n      status,\n      confidence: ai.confidence ?? 0,\n      fields,\n      message: usable\n        ? 'Reading your space looked clear.'\n        : 'We had trouble reading this photo — please fill in the details below.',\n    },\n  },\n];"
+        "jsCode": "// Parse the model's JSON reply, re-validate against the scan enums, and shape the webhook response.\n// Enum source of truth: src/lib/scans.ts + supabase/migrations/20260618130000_proj3_scans.sql\nconst ENUMS = {\n  surface: ['gravel', 'lawn', 'soil', 'paved', 'mixed'],\n  space_type: ['front_garden', 'back_garden', 'balcony', 'bed'],\n  sun_exposure: ['full', 'partial', 'shade'],\n};\nconst inSet = (v, k) => ENUMS[k].includes(v);\n\n// Tolerant text extraction — provider-agnostic on purpose. Handles OpenRouter /\n// OpenAI-compatible `choices[0].message.content` (the current wiring) AND the\n// Anthropic shapes ($json.text, $json.content[0].text) so switching the upstream\n// node back does not silently break this node.\n// NOTE: the fallthrough is '{}' , which parses to usable:false — i.e. a shape this\n// function does not know degrades to a BLANK scan form with no error anywhere.\n// If you add a provider, add its branch here first.\nfunction extractText(j) {\n  // OpenRouter / OpenAI-compatible\n  const choice = j.choices?.[0]?.message?.content;\n  if (typeof choice === 'string') return choice;\n  if (Array.isArray(choice)) {\n    const t = choice.find((b) => b && typeof b.text === 'string');\n    if (t) return t.text;\n  }\n  // Anthropic / n8n AI node shapes\n  if (typeof j.text === 'string') return j.text;\n  const c = j.content;\n  if (typeof c === 'string') return c;\n  if (Array.isArray(c)) {\n    const t = c.find((b) => b && b.type === 'text' && typeof b.text === 'string');\n    if (t) return t.text;\n  }\n  if (Array.isArray(j.message?.content)) {\n    const t = j.message.content.find((b) => b && b.type === 'text' && typeof b.text === 'string');\n    if (t) return t.text;\n  }\n  return '{}';\n}\n\nlet raw = extractText($json).trim();\n// Defend against accidental markdown fences or prose around the JSON object.\nconst first = raw.indexOf('{');\nconst last = raw.lastIndexOf('}');\nif (first !== -1 && last !== -1) raw = raw.slice(first, last + 1);\n\nlet ai;\ntry {\n  ai = JSON.parse(raw);\n} catch (e) {\n  ai = { usable: false, confidence: 0 };\n}\n\nconst fieldsValid =\n  inSet(ai.surface, 'surface') &&\n  inSet(ai.space_type, 'space_type') &&\n  inSet(ai.sun_exposure, 'sun_exposure') &&\n  Number.isInteger(ai.area_sqm) && ai.area_sqm >= 1 && ai.area_sqm <= 5000;\n\nconst usable =\n  ai.usable === true &&\n  ai.is_plantable_space === true &&\n  (ai.confidence ?? 0) >= 0.5 &&\n  fieldsValid;\n\n// A photo is never rejected merely for 'not being a garden' — balconies/paved/gravel are valid.\nconst branch = usable ? 'ok' : 'fallback';\nconst status = usable ? 'ok' : (ai.usable === false ? 'rejected' : 'low_confidence');\n\nconst fields = usable\n  ? {\n      surface: ai.surface,\n      space_type: ai.space_type,\n      sun_exposure: ai.sun_exposure,\n      area_sqm: ai.area_sqm,\n    }\n  : null;\n\nreturn [\n  {\n    json: {\n      branch,\n      status,\n      confidence: ai.confidence ?? 0,\n      fields,\n      message: usable\n        ? 'Reading your space looked clear.'\n        : 'We had trouble reading this photo — please fill in the details below.',\n    },\n  },\n];"
       },
       "id": "b1a1c0de-0003-4000-a000-000000000003",
       "name": "Parse & shape",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [260, 300]
+      "position": [500, 300]
     },
     {
       "parameters": {
@@ -99,7 +105,7 @@
       "name": "Switch (usable?)",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
-      "position": [500, 300]
+      "position": [740, 300]
     },
     {
       "parameters": {
@@ -111,7 +117,7 @@
       "name": "Respond ✓ (ok)",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [760, 200]
+      "position": [1000, 200]
     },
     {
       "parameters": {
@@ -123,16 +129,21 @@
       "name": "Respond ⚠ (fallback)",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
-      "position": [760, 400]
+      "position": [1000, 400]
     }
   ],
   "connections": {
     "Webhook": {
       "main": [
-        [{ "node": "Analyze Image (Claude)", "type": "main", "index": 0 }]
+        [{ "node": "Build request", "type": "main", "index": 0 }]
       ]
     },
-    "Analyze Image (Claude)": {
+    "Build request": {
+      "main": [
+        [{ "node": "Analyze Image (OpenRouter)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Analyze Image (OpenRouter)": {
       "main": [
         [{ "node": "Parse & shape", "type": "main", "index": 0 }]
       ]
@@ -154,7 +165,7 @@
   "pinData": {},
   "meta": {
     "templatecredsSetupCompleted": false,
-    "description": "Sproutly Scan stage: Webhook -> Claude vision classify -> Switch (usable?) -> Respond. Returns prefill JSON for the editable 'Here's what we see' screen. No DB writes."
+    "description": "Sproutly Scan stage: Webhook -> build payload -> OpenRouter vision classify (HTTP Request) -> Switch (usable?) -> Respond. Returns prefill JSON for the editable 'Here's what we see' screen. No DB writes."
   },
   "tags": [{ "name": "sproutly" }, { "name": "scan" }, { "name": "ai-vision" }]
 }

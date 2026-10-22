@@ -2,22 +2,33 @@
 
 > AI-native workflow for Sproutly's **Scan** stage. Powers the photo → "Reading your space…" → "Here's what we see" prefill flow.
 > Shape: **Webhook → AI classification → Switch → Action** (1 trigger, 1 AI reasoning step, 1 automated action).
+> **Provider: OpenRouter** (`POST /api/v1/chat/completions`) since 2026-10-22 — see [Provider](#provider--openrouter).
 
 ## Why this exists
 
-Sproutly's PRD reserves an explicit AI swap-in point: *"Scan: EXIF + manual form → vision model populates the **same** fields."* Today users fill every field by hand. This workflow lets a Claude vision model read the uploaded photo and pre-fill the four scan fields, which the user then reviews and edits before saving. The human-in-the-loop is the confirmation screen — the workflow itself writes nothing to the database.
+Sproutly's PRD reserves an explicit AI swap-in point: *"Scan: EXIF + manual form → vision model populates the **same** fields."* Today users fill every field by hand. This workflow lets a vision model read the uploaded photo and pre-fill the four scan fields, which the user then reviews and edits before saving. The human-in-the-loop is the confirmation screen — the workflow itself writes nothing to the database.
 
 It runs **synchronously**: the app uploads the photo, calls this workflow, and waits for the structured result to prefill the editable form. (The earlier async-enrichment pattern in `/api/enrich` doesn't fit here because the values are needed *before* the scan row is saved.)
 
 ## Flow
 
 ```
-[Webhook]  →  [Analyze Image (Claude)]  →  [Parse & shape]  →  [Switch: usable?]  →  ┌─ ok ──────→ [Respond ✓]
-  Trigger        AI reasoning                (plumbing)           routing            └─ fallback ─→ [Respond ⚠]
-                                                                                          Action (Respond to Webhook)
+[Webhook] → [Build request] → [Analyze Image (OpenRouter)] → [Parse & shape] → [Switch: usable?] → ┌─ ok ──────→ [Respond ✓]
+  Trigger     (plumbing)          AI reasoning                   (plumbing)         routing        └─ fallback ─→ [Respond ⚠]
+                                                                                                        Action (Respond to Webhook)
 ```
 
-The named core is **1 trigger** (Webhook), **1 AI reasoning step** (Claude vision, via n8n's **AI Analyze Image** node), **1 automated action** (Respond to Webhook). The `Parse & shape` Code node is plumbing (parses Claude's JSON, validates enums, picks the branch); the Switch makes the routing explicit per the assignment.
+The named core is **1 trigger** (Webhook), **1 AI reasoning step** (vision classification via an HTTP Request to OpenRouter), **1 automated action** (Respond to Webhook). The two Code nodes are plumbing: `Build request` assembles the chat-completions payload, `Parse & shape` parses the reply, validates enums and picks the branch. The Switch makes the routing explicit per the assignment.
+
+## Provider — OpenRouter
+
+The AI step is a plain **HTTP Request** node against OpenRouter's OpenAI-compatible endpoint, not a provider-specific n8n AI node. Rationale:
+
+- n8n's OpenRouter integration (`lmChatOpenRouter`) is a **sub-node** that needs a LangChain root node, which doesn't fit this Webhook → respond shape. An HTTP Request node does, and keeps the request shape visible and debuggable.
+- The prompt lives in the `Build request` **Code** node rather than in the HTTP node's JSON body, so apostrophes, quotes, newlines and the model slug need no escaping gymnastics.
+- Swapping providers is then one constant (`MODEL`) plus a credential — and `Parse & shape` already tolerates both the OpenAI-compatible and the Anthropic reply shapes.
+
+**Previous wiring (before 2026-10-22):** `@n8n/n8n-nodes-langchain.anthropic`, resource *Image* → operation *Analyze*, model `claude-sonnet-4-6`, Anthropic API credential. Both Code nodes still accept that node's output, so reverting means replacing the two nodes and nothing else.
 
 ## Nodes
 
@@ -34,13 +45,18 @@ The named core is **1 trigger** (Webhook), **1 AI reasoning step** (Claude visio
   ```
   `photo_url` is a **short-lived (~120s) Supabase signed URL** — the `photos` bucket is private, so the app mints the URL server-side with the service-role key.
 
-### 2. Analyze Image (Claude) — AI reasoning step
-- n8n's **AI "Analyze Image"** node, backed by the **Anthropic** model credential (equivalent to a `POST https://api.anthropic.com/v1/messages` call with an image block — the node handles auth and request shaping for you).
-- Model **`claude-sonnet-4-6`** (fast, cheap, strong vision + structured output). Swap to `claude-opus-4-8` if accuracy needs it.
-- **Image URL:** pass the photo by URL, not binary — set the node's image URL field to `{{ $json.body.photo_url }}` (robust form: `{{ $('Webhook').item.json.body.photo_url }}`). Do **not** use `webhookUrl` (that's n8n's own callback URL).
-- **Prompt:** put the enum-locked classifier prompt (below) in the node's text/prompt field; it forces a single JSON object constrained to the exact enum tokens.
-- **Output shape note:** the Analyze Image node returns the model's text in its own output field (commonly `content` or `text`), which may differ from the raw Messages API's `content[0].text`. Run the node once, inspect the output, and point **Parse & shape** at the correct path (see node 3's note).
-- **Expected model output:**
+### 2a. Build request — plumbing (Code)
+- Assembles the OpenRouter chat-completions payload: the enum-locked classifier prompt (below) as a `text` content block, plus an `image_url` block carrying `$('Webhook').item.json.body.photo_url`. The postcode hint is appended to the prompt (`'none'` when absent).
+- **`MODEL`** is the single constant to change — currently **`anthropic/claude-sonnet-4.5`**. Verify any slug at <https://openrouter.ai/models>; OpenRouter slugs are `vendor/model` and do change. Keep a fast vision model: `/api/classify-vision` aborts the whole call at **30s**.
+- `max_tokens: 400` — the JSON object fits comfortably.
+
+### 2b. Analyze Image (OpenRouter) — AI reasoning step
+- **HTTP Request** node, `POST https://openrouter.ai/api/v1/chat/completions`.
+- **Auth:** Authentication = *Generic Credential Type* → *Header Auth*, using a credential with name `Authorization`, value `Bearer sk-or-…`. (Header Auth, not an OpenRouter credential type — see [Provider](#provider--openrouter).)
+- **Body:** Send Body → JSON → `{{ JSON.stringify($json.payload) }}` (built by node 2a).
+- **Timeout: 25 000 ms**, deliberately inside the route's 30s abort so a slow provider surfaces as an n8n error rather than a client-side abort with no execution record.
+- **Image by URL, not binary:** production relies on the signed URL being fetchable — see the gotcha below.
+- **Expected model output** (inside `choices[0].message.content`):
   ```json
   {
     "usable": true,
@@ -55,7 +71,8 @@ The named core is **1 trigger** (Webhook), **1 AI reasoning step** (Claude visio
   ```
 
 ### 3. Parse & shape — plumbing (Code)
-- `JSON.parse`s the Claude response text. The path depends on the node feeding it: the raw HTTP Request node exposes `content[0].text`, whereas the **AI Analyze Image** node exposes the text on its own field (e.g. `$json.content` or `$json.text`). Confirm against node 2's actual output and adjust the parse path accordingly.
+- `JSON.parse`s the model's response text. `extractText()` is **provider-agnostic by design**: it tries OpenAI-compatible `choices[0].message.content` first (the current wiring), then the Anthropic shapes (`$json.text`, `$json.content[0].text`, `$json.message.content[]`). Also strips stray markdown fences and surrounding prose.
+- **⚠ An unrecognised reply shape fails silently.** `extractText()` falls through to `'{}'`, which parses to `usable:false` → `status: low_confidence` → a **blank scan form with no error anywhere** (the route turns every upstream problem into a graceful fallback by design). When you add or change a provider, add its branch here *first* — a blank review form is the symptom.
 - Re-validates every value against the allowed enum sets and the `area_sqm` 1–5000 integer range (defends against the model emitting an off-schema token).
 - Computes `branch` (`ok` | `fallback`) and `status` (`ok` | `low_confidence` | `rejected`) and builds the response contract.
 
@@ -128,8 +145,12 @@ Screen 2 (`scan-form.tsx`) calls this and shows "Reading your space…"; screen 
 | App (Vercel) | `N8N_CLASSIFY_WEBHOOK_URL` | The n8n webhook endpoint |
 | App (Vercel) | `N8N_CLASSIFY_SECRET` | Sent as `x-sproutly-secret` |
 | App (Vercel) | `SUPABASE_SERVICE_ROLE_KEY` | *(existing)* mint signed URLs |
-| n8n | `ANTHROPIC_API_KEY` | Anthropic credential |
+| n8n | *(credential, not an env var)* `Authorization: Bearer sk-or-…` | **OpenRouter** Header Auth credential — the model key |
 | n8n | `N8N_CLASSIFY_SECRET` | Header-auth credential (matches the app's) |
+
+The OpenRouter key lives **only** in the n8n credential — not in the repo, not in Vercel. Changing providers needs **no app env change and no redeploy**: `N8N_CLASSIFY_WEBHOOK_URL` / `N8N_CLASSIFY_SECRET` authenticate the app↔n8n hop and are unrelated to the model key.
+
+> `ANTHROPIC_API_KEY` is still required for the **catalogue ETL** (`scripts/lib/ai-traits.mjs` calls `@anthropic-ai/sdk` directly, using Anthropic-only `thinking` + `output_config` parameters). It was never used by this workflow's app side and is not part of this migration.
 
 **No DB migration required** — all four fields already exist on `scans`.
 
@@ -146,18 +167,27 @@ Screen 2 (`scan-form.tsx`) calls this and shows "Reading your space…"; screen 
 3. **Enum lockstep (co-located test, per `.claude/rules/project-quality.md`):** assert the prompt's allowed tokens equal the unions in `src/lib/scans.ts`.
 4. **End-to-end:** upload → "Reading your space…" → prefilled screen 3 → edit one field → save → the **edited** value lands in `scans` and the plan generates. Then the **skip** path: manual entry → save → plan, n8n never called.
 
-### Gotcha — test image host must be fetchable by *Anthropic's* servers
+### Gotcha — test image host must be fetchable by the *model provider's* servers
 
-The **Analyze Image** node passes the image by **URL**, and **Anthropic's servers fetch it** (not n8n, not your browser). If that fetch fails, the node errors with an Anthropic `invalid_request_error`: *"Unable to download the file. Please verify the URL and try again."* (HTTP 400).
+The payload passes the image by **URL**, and the **provider's servers fetch it** (not n8n, not your browser). With OpenRouter this is one layer deeper: OpenRouter forwards to whichever upstream provider serves the slug, and *that* host does the fetch. A failed fetch comes back as a 4xx from the chat-completions call.
 
-- **Wikimedia (`upload.wikimedia.org`) does not work as a test source** even though the URL returns `200 image/jpeg` from curl/a browser. Wikimedia blocks AI-company crawlers, so Anthropic's fetcher gets refused. A URL being reachable from your machine says nothing about whether Anthropic can fetch it.
-- **Production is unaffected:** the app sends a short-lived **Supabase signed URL**, which Anthropic *can* fetch. Keep **Input Type = Image URL(s)** for the real app.
+- **Wikimedia (`upload.wikimedia.org`) does not work as a test source** even though the URL returns `200 image/jpeg` from curl/a browser — it blocks AI-company crawlers. A URL being reachable from your machine says nothing about whether the provider can fetch it.
+- **Production is unaffected:** the app sends a short-lived **Supabase signed URL**, which providers *can* fetch. Keep the `image_url` block for the real app.
 - **For a quick pipeline smoke test:** use a fetch-friendly host, e.g. `https://picsum.photos/640/480`. It's not a garden, so it correctly routes to **Branch B (fallback)** — which validates the rejection path.
-- **To test a real garden image (Branch A) without host worries:** temporarily switch the node to **binary input** — insert an HTTP Request (GET the `photo_url`, Response Format = `File`, field `data`) between Webhook and Analyze Image, set Analyze Image **Input Type = Binary** (field `data`), so n8n downloads the bytes and hands them to Claude directly. **Revert to Image URL(s) before shipping** (production relies on signed-URL fetching).
+- **To test a real garden image (Branch A) without host worries:** inline the bytes instead of linking them. Insert an HTTP Request (GET the `photo_url`, Response Format = `File`, field `data`) between Webhook and Build request, then in Build request send a data URL: `{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + $input.first().binary.data.data } }`. **Revert to the signed URL before shipping** — base64 inflates every request by ~33%.
 - Other 4xx failure modes seen while wiring this up: **404** *"webhook … is not registered"* → the test URL only listens for one call right after clicking **Execute Workflow** (or toggle the workflow **Active** and use the `/webhook/` production URL); **403** *"Authorization data is wrong!"* → the `x-sproutly-secret` header name/value doesn't match the n8n **Header Auth** credential.
 
 ## Import
 
-`docs/n8n/scan-vision.workflow.json` is an importable n8n workflow. In n8n: **Workflows → Import from File**. Then create two credentials it references: **Anthropic API** and a **Header Auth** credential named for `x-sproutly-secret`.
+`docs/n8n/scan-vision.workflow.json` is an importable n8n workflow. In n8n: **Workflows → Import from File**. Then create the **two Header Auth credentials** it references and attach them (the export carries `REPLACE_WITH_…` placeholder ids):
 
-> Note: the exported JSON wires the AI step as n8n's **AI Analyze Image** node (`@n8n/n8n-nodes-langchain.anthropic`, resource *Image* → operation *Analyze*), passing the photo by URL (`{{ $('Webhook').item.json.body.photo_url }}`). Two fields may need adjusting for your n8n version on import: the node's **`typeVersion`** and the exact **parameter names** (`modelId` / `text` / `imageUrls`). The **Parse & shape** node is written to tolerate either output shape (the Analyze Image node's `text`/`content` field *or* the raw API's `content[0].text`), so it needs no change either way.
+| Node | Credential | Header |
+|---|---|---|
+| Webhook | `Sproutly webhook secret (x-sproutly-secret)` | `x-sproutly-secret: <N8N_CLASSIFY_SECRET>` |
+| Analyze Image (OpenRouter) | `OpenRouter API (Authorization: Bearer sk-or-...)` | `Authorization: Bearer sk-or-…` |
+
+Then: open **Build request**, confirm `MODEL` is a slug that exists on your OpenRouter account, and check the **Parse & shape** output of one test run before activating.
+
+Standing the n8n instance up from scratch (VPS, TLS, credentials, cut-over, backups): `docs/n8n-self-host-runbook.md`.
+
+> Note: the HTTP Request node's **`typeVersion`** (exported as `4.2`) and the body-parameter names (`specifyBody` / `jsonBody`) may need adjusting for your n8n version on import. The **Parse & shape** node tolerates both the OpenAI-compatible and the Anthropic reply shapes, so it needs no change if you switch the AI node back.
